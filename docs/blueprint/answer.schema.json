@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AuraAnswer",
+  "type": "object",
+  "properties": {
+    "jawaban_final": {
+      "type": "string",
+      "description": "Satu jawaban final, kalimat utuh, tanpa bullet"
+    },
+    "intonasi": {
+      "type": "string"
+    },
+    "gestur": {
+      "type": "string"
+    },
+    "jeda": {
+      "type": "string"
+    },
+    "estimasi_durasi_detik": {
+      "type": "integer"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "ketik",
+        "lisan"
+      ]
+    },
+    "sumber": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "uncertain": {
+      "type": "boolean"
+    },
+    "activity_type": {
+      "type": "string",
+      "enum": [
+        "interview",
+        "rgd",
+        "unknown"
+      ],
+      "description": "Jenis sesi disimpulkan otomatis dari screenshot, prompt, atau transkrip; unknown bila bukti tidak memadai"
+    },
+    "activity_certainty": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "Penilaian tingkat kepastian secara kualitatif, bukan probabilitas terkalibrasi"
+    },
+    "activity_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Petunjuk konkret dari input yang mendukung klasifikasi; kosong bila unknown tanpa bukti"
+    }
+  },
+  "required": [
+    "jawaban_final",
+    "intonasi",
+    "gestur",
+    "jeda",
+    "estimasi_durasi_detik",
+    "mode",
+    "sumber",
+    "uncertain",
+    "activity_type",
+    "activity_certainty",
+    "activity_evidence"
+  ],
+  "additionalProperties": false
+}

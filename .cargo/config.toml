@@ -1,0 +1,6 @@
+# Match the statically linked libsodium package used by Stronghold on Windows x64.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+SODIUM_LIB_DIR = { value = "src-tauri/vendor/libsodium/x64", relative = true }

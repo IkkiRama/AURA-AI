@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AURA",
+  "version": "1.3.0",
+  "identifier": "id.aura.interview",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist",
+    "windows": { "staticVCRuntime": false }
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "AURA — AI Interview Companion",
+        "width": 1260,
+        "height": 840,
+        "minWidth": 720,
+        "minHeight": 480,
+        "center": true,
+        "dragDropEnabled": false,
+        "backgroundColor": "#101b2b"
+      },
+      {
+        "label": "prompt",
+        "title": "AURA Prompt",
+        "url": "index.html?panel=prompt",
+        "width": 420,
+        "height": 540,
+        "minWidth": 300,
+        "minHeight": 160,
+        "x": 30,
+        "y": 80,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "dragDropEnabled": false
+      },
+      {
+        "label": "answer",
+        "title": "AURA Jawaban",
+        "url": "index.html?panel=answer",
+        "width": 420,
+        "height": 520,
+        "minWidth": 300,
+        "minHeight": 160,
+        "x": 480,
+        "y": 80,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": false,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost https://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost ws://localhost:1420; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "capabilities": ["desktop"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
+    "category": "Productivity",
+    "shortDescription": "Pendamping latihan interview dan RGD"
+  }
+}

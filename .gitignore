@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.env
+.env.*
+*.db
+*.db-*
+.build-cache/
+release/
