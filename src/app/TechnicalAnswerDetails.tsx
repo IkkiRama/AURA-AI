@@ -1,7 +1,8 @@
 import type { AuraAnswer } from '../features/ai/answer.schema';
+import { reviewMessages } from '../features/ai/verification';
 
 const basisLabel: Record<NonNullable<AuraAnswer['experience_basis']>, string> = {
-  document_supported: 'Didukung dokumen yang dirujuk',
+  document_supported: 'Ditautkan ke dokumen oleh pengguna',
   user_provided: 'Disampaikan pengguna',
   inferred: 'Inferensi dari konteks',
   hypothetical: 'Contoh hipotetis',
@@ -23,14 +24,15 @@ function DetailList({ title, items, ordered = false }: { title: string; items?: 
 export function TechnicalAnswerDetails({ answer }: { answer: AuraAnswer }) {
   const {
     key_points, technical_explanation, supporting_evidence, experience_basis, potential_followups,
-    code_artifact, coding_steps, verification_steps,
+    code_artifact, coding_steps, verification_steps, reviewIssues,
   } = answer;
   const basis = experience_basis ? basisLabel[experience_basis] : '';
-  if (!technical_explanation && !code_artifact && !basis && ![key_points, supporting_evidence, potential_followups, coding_steps, verification_steps].some((items) => items?.length)) return null;
+  if (!technical_explanation && !code_artifact && !basis && ![key_points, supporting_evidence, potential_followups, coding_steps, verification_steps, reviewIssues].some((items) => items?.length)) return null;
 
   return <details className="aura-details min-w-0 max-w-full">
     <summary>Detail jawaban</summary>
     <div className="mt-3 grid min-w-0 gap-3 wrap-anywhere">
+      <DetailList title="Pemeriksaan lokal" items={reviewIssues?.map((issue) => reviewMessages[issue]).filter(Boolean)} />
       <DetailList title="Poin utama" items={key_points} />
       {technical_explanation && <div><strong>Penjelasan teknis</strong><p className="whitespace-pre-wrap">{technical_explanation}</p></div>}
       {code_artifact && <div className="min-w-0">

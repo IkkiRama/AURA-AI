@@ -19,6 +19,7 @@ export interface ContextInputs {
   stage: SessionStage;
   job?: { company: string; role: string; description: string } | null;
   profileFacts: string[];
+  evidence?: readonly { ref: string; line: string }[];
   pinnedFacts: string[];
   activePositions: { speaker: string; claim: string }[];
   summaries: string[];
@@ -39,6 +40,7 @@ export interface ContextPacket {
   totalTokens: number;
   sections: SectionReport[];
   usedHistoryIds: number[];
+  usedEvidenceRefs?: string[];
 }
 
 export const STRATEGY_BUDGETS: Record<MemoryStrategy, Record<string, number> & { recentCount: number; historyCount: number }> = {
@@ -95,9 +97,14 @@ export function assembleContext(input: ContextInputs): ContextPacket {
     );
   }
   profileItems.push(...input.profileFacts.map((f) => `- ${f}`));
-  const profile = fill('profil', b.profile, profileItems);
+  const candidates = input.evidence ?? [];
+  const evidence = fill('bukti_personal', Math.floor(b.profile * 0.62), candidates.map(({ ref, line }) => `- [${ref}] ${line}`));
+  const usedEvidenceRefs = evidence.accepted.map((index) => candidates[index].ref);
+  const profile = fill('profil', b.profile - evidence.report.tokens, profileItems);
   sections.push(profile.report);
   if (profile.lines.length) out.push(`[PROFIL & LOWONGAN]\n<data>\n${profile.lines.join('\n')}\n</data>`);
+  if (candidates.length) sections.push(evidence.report);
+  if (evidence.lines.length) out.push(`[BUKTI PERSONAL]\n<data>\n${evidence.lines.join('\n')}\n</data>`);
 
   const pinned = fill('fakta_terkunci', b.pinned, input.pinnedFacts.map((f) => `- ${f}`));
   sections.push(pinned.report);
@@ -149,7 +156,7 @@ export function assembleContext(input: ContextInputs): ContextPacket {
   out.push(latestBlock);
 
   const text = out.join('\n\n');
-  return { text, totalTokens: estimateTokens(text), sections, usedHistoryIds };
+  return { text, totalTokens: estimateTokens(text), sections, usedHistoryIds, ...(usedEvidenceRefs.length && { usedEvidenceRefs }) };
 }
 
 /** Local extractive checkpoint summary (free — no API call). */

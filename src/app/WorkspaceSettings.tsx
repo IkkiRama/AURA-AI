@@ -12,6 +12,7 @@ import { useAura } from './store';
 import { ReleaseSettingsLinks } from './update/ReleasePages';
 import { TeleprompterSettings } from '@/features/teleprompter/TeleprompterSettings';
 import { listMicrophones, type MicrophoneDevice } from '@/features/teleprompter/useSpeechTracking';
+import { AnswerDnaPage } from '@/features/personalization/AnswerDnaPage';
 
 const providerName: Record<Provider, string> = { gemini: 'Google Gemini', openai: 'OpenAI' };
 const providers: Provider[] = ['gemini', 'openai'];
@@ -93,11 +94,20 @@ function NumberField({ label, value, min, max, onValue }: { label: string; value
 export function SettingsPage() {
   return <div className="aura-page">
     <ReleaseSettingsLinks />
-    <a className="aura-button" href="#settings-teleprompter" style={{ justifySelf: 'start' }}>Teleprompter</a>
+    <div className="aura-actions">
+      <a className="aura-button" href="#settings-teleprompter">Teleprompter</a>
+      <a className="aura-button" href="#settings-answer-dna">Personal Answer DNA</a>
+    </div>
     <div className="aura-grid-two"><ProviderSettings /><AppearanceSettings /></div>
     <div className="aura-grid-two"><BudgetSettings /><CalibrationSettings /></div>
     <PrivacySettings />
   </div>;
+}
+
+export function DnaSettingsPage() {
+  const profile = useAura((s) => s.data.answerDna);
+  const setData = useAura((s) => s.setData);
+  return <AnswerDnaPage profile={profile} onSave={(answerDna) => setData({ answerDna })} />;
 }
 
 export function SpeechSettingsPage() {

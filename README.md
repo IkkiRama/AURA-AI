@@ -4,7 +4,7 @@ AURA membantu persiapan interview dan role group discussion dari pertanyaan, scr
 
 ## Menjalankan aplikasi desktop
 
-Di folder proyek, buka `release\AURA_1.5.0.exe` untuk menjalankan build lokal dengan updater nonaktif. Installer produksi yang ditandatangani memuat konfigurasi feed HTTPS dan kunci publik updater. Installer NSIS untuk rilis tersebut dibuat di `release\v<VERSI>\AURA_<VERSI>_x64-setup.exe`. Repositori menyertakan workflow **AURA Windows release** yang dijalankan secara manual di GitHub Actions. [Panduan rilis Windows](docs/RELEASE.md)
+Di folder proyek, buka `release\AURA_1.6.0.exe` untuk menjalankan build lokal dengan updater nonaktif. Installer produksi yang ditandatangani memuat konfigurasi feed HTTPS dan kunci publik updater. Installer NSIS untuk rilis tersebut dibuat di `release\v<VERSI>\AURA_<VERSI>_x64-setup.exe`. Repositori menyertakan workflow **AURA Windows release** yang dijalankan secara manual di GitHub Actions. [Panduan rilis Windows](docs/RELEASE.md)
 
 ## Menjalankan dari kode sumber
 
@@ -37,6 +37,12 @@ Pengguna v1.3.0 memasang installer rilis yang sudah dikonfigurasi satu kali untu
 7. Gunakan **Akhiri sesi** setelah selesai. Penyimpanan riwayat lokal dapat diaktifkan di Settings sebelum sesi diakhiri.
 
 Preferensi juga dapat diperbarui sekali melalui kolom prompt, misalnya `Mulai sesi ini seluruh jawaban maksimal 45 detik untuk mengetik, panjang 25–35 kata.` Preferensi tersebut digunakan pada input berikutnya.
+
+## Evidence Vault dan Personal Answer DNA
+
+Di **Jobs & Profiles → Evidence Vault**, simpan ringkasan fakta pengalaman, kategori, dan asal klaim. Jika memilih bukti yang didukung dokumen, tautkan berkas dari Knowledge Base. Tautan dokumen adalah penandaan pengguna. AURA membatasi konteks yang dikirim pada cuplikan terpilih ketika pengiriman ke provider diizinkan.
+
+Di **Settings → Personal Answer DNA**, aktifkan profil untuk mengatur gaya, bahasa, dan istilah teknis. Kamu bisa menempel contoh latihan untuk melihat pola kalimat. AURA mengolahnya di perangkat dan menyimpan preferensi hanya bila kamu menekan **Simpan Answer DNA**. Lihat **Detail jawaban** untuk memeriksa catatan hasil pemeriksaan lokal.
 
 ## Teleprompter dan Rescue
 

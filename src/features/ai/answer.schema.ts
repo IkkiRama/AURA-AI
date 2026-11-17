@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ReviewIssue } from './verification';
 import type { QuestionAnalysis } from '../intelligence/intent';
 import type { OutputSchema } from './types';
 
@@ -116,7 +117,7 @@ export const LayeredAnswerSchema = AnswerSchema.extend({
   verification_steps: layerList.optional(),
 });
 
-export type AuraAnswer = z.infer<typeof LayeredAnswerSchema>;
+export type AuraAnswer = z.infer<typeof LayeredAnswerSchema> & { reviewIssues?: ReviewIssue[] };
 
 function briefList(description: string) {
   return { type: 'array', items: { type: 'string' }, description };
@@ -125,7 +126,7 @@ function briefList(description: string) {
 const detailProperties = {
   key_points: briefList('Hingga empat poin pendek, hanya bila menambah konteks.'),
   technical_explanation: { type: 'string', description: 'Penjelasan teknis singkat, terpisah dari jawaban final.' },
-  supporting_evidence: briefList('Rujukan yang benar-benar terdapat dalam konteks. Kosong bila tidak ada.'),
+  supporting_evidence: briefList('ID rujukan bukti personal dari konteks, misalnya E1. Kosong bila tidak merujuk bukti personal.'),
   experience_basis: { type: 'string', enum: experienceBases, description: 'Dasar pengalaman pribadi. Gunakan not_applicable bila tidak relevan.' },
   potential_followups: briefList('Hingga dua pertanyaan lanjutan untuk latihan. Kosong bila tidak diperlukan.'),
 };
@@ -162,7 +163,7 @@ function layeredContract(name: string, fields: Record<string, unknown>): OutputS
 const detailedAnswer = layeredContract('aura_answer_details', detailProperties);
 const technicalAnswer = layeredContract('aura_answer_technical', { ...detailProperties, ...codeProperties });
 
-export function answerSchemaFor(question: Pick<QuestionAnalysis, 'intent'>): OutputSchema {
+export function answerSchemaFor(question: Pick<QuestionAnalysis, 'intent'>, includeEvidence = false): OutputSchema {
   switch (question.intent) {
     case 'implementation':
     case 'debugging':
@@ -177,6 +178,6 @@ export function answerSchemaFor(question: Pick<QuestionAnalysis, 'intent'>): Out
     case 'technical-follow-up':
       return detailedAnswer;
     default:
-      return ANSWER_SCHEMA;
+      return includeEvidence ? detailedAnswer : ANSWER_SCHEMA;
   }
 }

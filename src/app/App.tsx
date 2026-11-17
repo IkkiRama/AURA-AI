@@ -27,10 +27,12 @@ const pages = [
 ] as const;
 const settingsPages = [
   { id: 'settings-teleprompter', title: 'Teleprompter', icon: SlidersHorizontal, description: 'Atur mikrofon, highlight ucapan, dan scroll panel jawaban.' },
+  { id: 'settings-answer-dna', title: 'Personal Answer DNA', icon: Sparkles, description: 'Atur gaya, bahasa, dan tempo untuk jawaban latihan.' },
   { id: 'settings-updates', title: 'Updates', icon: RefreshCw, description: 'Periksa versi dan atur waktu pemasangan.' },
   { id: 'settings-about', title: 'About AURA', icon: Info, description: 'Informasi aplikasi dan pengembang.' },
 ] as const;
-const routes = [...pages, ...settingsPages];
+const routes = [...pages, ...settingsPages, { id: 'evidence', title: 'Evidence Vault', icon: ShieldCheck,
+  description: 'Kelola pengalaman dan sumber yang dapat dirujuk dalam jawaban.' }] as const;
 
 function initialPage(): PageId {
   const page = location.hash.slice(1);
@@ -77,7 +79,7 @@ export function App() {
   }
 
   const current = routes.find((item) => item.id === page) ?? pages[0];
-  const activePage = page.startsWith('settings-') ? 'settings' : page;
+  const activePage = page.startsWith('settings-') ? 'settings' : page === 'evidence' ? 'jobs' : page;
   const { session, data } = state;
   const used = session.usage.reduce((total, item) => total + item.usd, 0) * data.budget.fxUsdIdr;
   const ratio = Math.min(100, (used / Math.max(1, data.budget.limitIdr)) * 100);

@@ -59,7 +59,8 @@ export function AnswerPanel({ answer, busy = false, error, onRegenerate, onShort
       {answer && <>
         {speechText ?? <p className="aura-answer-text" aria-live="polite">{answer.jawaban_final}</p>}
         <div className="aura-answer-meta"><Clock3 size={14} /> {words} kata · sekitar {estimateSeconds(words, answer.mode === 'ketik' ? 'KETIK' : 'LISAN', { typingWpm, speakingWpm })} detik</div>
-        {answer.uncertain && <p className="aura-callout is-warning">Sebagian informasi belum pasti. Tinjau jawaban sebelum digunakan.</p>}
+        {answer.uncertain && <p className="aura-callout is-warning">{answer.reviewIssues?.length
+          ? 'Periksa catatan pemeriksaan lokal di Detail jawaban.' : 'Sebagian informasi belum pasti. Tinjau jawaban sebelum digunakan.'}</p>}
         {maxWords !== undefined && words > maxWords && <p className="aura-callout is-warning">Jawaban melebihi batas {maxWords} kata. Gunakan tombol Pendekkan.</p>}
         {!compact && answer.isi_terbaca && <p className="aura-answer-detail"><strong>Konteks terbaca</strong> {answer.isi_terbaca}</p>}
         {answer.mode === 'lisan' && [answer.intonasi, answer.gestur, answer.jeda].some(Boolean) && <dl className="aura-answer-delivery">

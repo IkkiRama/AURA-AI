@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.6.0",
+    "date": "2026-11-17",
+    "summary": "AURA menambahkan sumber pengalaman pribadi, preferensi gaya yang bisa ditinjau, dan pemeriksaan jawaban lokal.",
+    "added": [
+      "Evidence Vault untuk mengelompokkan pengalaman, menandai asal informasi, dan menautkan dokumen lokal.",
+      "Personal Answer DNA opsional untuk bahasa, gaya, tempo, istilah pilihan, dan analisis singkat dari contoh latihan.",
+      "Catatan pemeriksaan lokal untuk angka, perubahan metrik, pengulangan, dan relevansi teknis."
+    ],
+    "improved": ["Refensi pengalaman hanya dikirim sebagai cuplikan relevan dalam batas konteks yang sudah ada."],
+    "fixed": ["Pemeriksaan lokal menyisihkan kalimat pengalaman pribadi ketika tidak menemukan dukungan yang cukup dalam konteks yang dikirim."],
+    "changed": ["Fakta profil lama tetap tersimpan. AURA memilih cuplikan dari fakta lama ketika relevan dengan pertanyaan."]
+  },
+  {
     "version": "1.5.0",
     "date": "2026-11-17",
     "summary": "AURA menambahkan teleprompter dengan transkripsi lokal, Rescue manual, dan klasifikasi pertanyaan adaptif.",

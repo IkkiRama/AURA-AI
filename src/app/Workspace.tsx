@@ -12,14 +12,15 @@ import { apiAllowed, STAGE_INFO, STAGE_LABEL, STAGES, suggestStage } from '../fe
 import { AnswerPanel } from './AnswerPanel';
 import { Composer } from './Composer';
 import { HistoryPage, JobsPage, KnowledgePage } from './WorkspaceLibrary';
-import { PromptStudioPage, SettingsPage, SpeechSettingsPage } from './WorkspaceSettings';
+import { DnaSettingsPage, PromptStudioPage, SettingsPage, SpeechSettingsPage } from './WorkspaceSettings';
+import { EvidenceVaultPage } from './EvidenceVaultPage';
 import { errorMessage, isDesktop } from './platform';
 import { useAura, type UsageRow } from './store';
 import { AboutPage, ChangelogPage, UpdatesPage } from './update/ReleasePages';
 import './workspace.css';
 
 export type PageId = 'dashboard' | 'copilot' | 'intelligence' | 'knowledge' | 'jobs' | 'prompts' | 'history'
-  | 'settings' | 'settings-updates' | 'settings-about' | 'settings-teleprompter' | 'changelog';
+  | 'settings' | 'settings-updates' | 'settings-about' | 'settings-teleprompter' | 'settings-answer-dna' | 'evidence' | 'changelog';
 
 interface WorkspaceProps {
   page: PageId;
@@ -44,18 +45,28 @@ export function Workspace({ page, goTo, openPanels }: WorkspaceProps) {
     case 'intelligence': return <IntelligencePage />;
     case 'knowledge': return <KnowledgePage />;
     case 'jobs': return <JobsPage />;
+    case 'evidence': return <EvidenceWorkspace />;
     case 'prompts': return <PromptStudioPage />;
     case 'history': return <HistoryPage />;
     case 'settings': return <SettingsPage />;
     case 'settings-updates': return <UpdatesPage />;
     case 'settings-about': return <AboutPage />;
     case 'settings-teleprompter': return <SpeechSettingsPage />;
+    case 'settings-answer-dna': return <DnaSettingsPage />;
     case 'changelog': return <ChangelogPage />;
     default: return <DashboardPage goTo={goTo} openPanels={openPanels} />;
   }
 }
 
 export default Workspace;
+
+function EvidenceWorkspace() {
+  const entries = useAura((s) => s.data.evidence);
+  const documents = useAura((s) => s.data.documents);
+  const save = useAura((s) => s.saveEvidence);
+  const remove = useAura((s) => s.removeEvidence);
+  return <EvidenceVaultPage entries={entries} documents={documents} onSave={save} onRemove={remove} />;
+}
 
 function DashboardPage({ goTo, openPanels }: Omit<WorkspaceProps, 'page'>) {
   const { data, session, vault } = useAura((s) => s);

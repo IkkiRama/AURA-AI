@@ -21,6 +21,10 @@ import { desktop, errorMessage, isDesktop, transport } from './platform';
 import { DEFAULT_UPDATE_PREFERENCES, loadUpdatePreferences, type UpdatePreferences } from './update/model';
 import { DEFAULT_TELEPROMPTER, loadTeleprompter, type TeleprompterPreferences } from '@/features/teleprompter/preferences';
 import { classifyQuestion, questionGuidance, type QuestionAnalysis } from '@/features/intelligence/intent';
+import { verifyAnswer } from '@/features/ai/verification';
+import { asksAboutPastExperience, loadEvidenceVault, normalizeEvidenceEntry, type EvidenceEntry } from '@/features/evidence/model';
+import { personalEvidenceGuidance, personalReferences } from '@/features/evidence/context';
+import { buildAnswerDnaGuidance, loadAnswerDna, type AnswerDna } from '@/features/personalization/model';
 
 export interface Doc { id: string; name: string; content: string; updatedAt: string }
 export interface Job { id: string; company: string; role: string; description: string }
@@ -46,6 +50,7 @@ export interface WorkspaceData {
   provider: Provider; models: Record<Provider, string>; prefs: AnswerPrefs; basePrompt: string;
   calibration: typeof DEFAULT_CALIBRATION; budget: BudgetPolicy; appearance: Appearance;
   documents: Doc[]; jobs: Job[]; activeJobId: string | null; profileFacts: string;
+  evidence: EvidenceEntry[]; answerDna: AnswerDna | null;
   history: HistoryEntry[]; saveHistory: boolean; trayEnabled: boolean;
   updates: UpdatePreferences; teleprompter: TeleprompterPreferences;
 }
@@ -89,6 +94,8 @@ interface AuraState extends AuraView {
   searchDocuments: (query: string) => Promise<DocumentHit[]>;
   saveJob: (job: Job) => void;
   deleteJob: (id: string) => void;
+  saveEvidence: (entry: EvidenceEntry) => void;
+  removeEvidence: (id: string) => void;
   deleteHistory: (id: string) => void;
   clearData: () => Promise<void>;
   unlockVault: (password: string) => Promise<void>;
@@ -109,6 +116,7 @@ const defaults: WorkspaceData = {
   appearance: { promptOpacity: 45, answerOpacity: 45, promptOnTop: false, answerOnTop: false,
     promptCompact: false, answerCompact: false, blur: 0, fontScale: 100, highContrast: false },
   documents: [], jobs: [], activeJobId: null, profileFacts: '', history: [], saveHistory: false, trayEnabled: false,
+  evidence: [], answerDna: null,
   updates: DEFAULT_UPDATE_PREFERENCES, teleprompter: DEFAULT_TELEPROMPTER,
 };
 const freshSession = (): SessionState => ({
@@ -233,7 +241,8 @@ export const useAura = create<AuraState>((set, get) => {
           matches = turnMatches(session.turns, searchText, bounds.historyCount + bounds.recentCount);
         }
       }
-      const hits = await get().searchDocuments(searchText);
+      const privateDocuments = new Set(data.evidence.flatMap((entry) => entry.documentId ? [entry.documentId] : []));
+      const hits = (await get().searchDocuments(searchText)).filter((hit) => !privateDocuments.has(hit.id));
       const hiddenClaims = new Set(session.claims.filter((claim) => claim.supersededBy !== null).map((claim) => claim.id));
       const liveTurns = session.turns.filter((turn) => !hiddenClaims.has(turn.id));
       const job = data.jobs.find((entry) => entry.id === data.activeJobId);
@@ -244,11 +253,18 @@ export const useAura = create<AuraState>((set, get) => {
         .flatMap((turnId) => turnId === null ? [] : liveTurns.filter((turn) => turn.id === turnId));
       const relevant = [...new Map([...parentContext, ...matches.filter((turn) => !hiddenClaims.has(turn.id))]
         .map((turn) => [turn.id, turn])).values()];
+      const parentQuestion = parentContext.find((turn) => turn.id === question.parentQuestionId)?.text;
+      const answerForUser = resultSpeaker === 'aura';
+      const personalQuestion = answerForUser && (question.intent === 'behavioral' || asksAboutPastExperience(text)
+        || Boolean(parentQuestion && asksAboutPastExperience(parentQuestion)));
+      const references = answerForUser ? personalReferences({ question: text, parentQuestion, intent: question.intent, personalQuestion,
+        entries: data.evidence, legacyFacts: data.profileFacts, documents: data.documents }) : [];
       const context = assembleContext({
         strategy: data.budget.strategy, latestInput: text, hasImage: Boolean(image),
         stage: session.stage, activity: session.activity,
         job,
-        profileFacts: [...data.profileFacts.split('\n').filter(Boolean), ...hits.map((hit) => `[${hit.title}] ${hit.text}`)],
+        profileFacts: hits.map((hit) => `Referensi umum [${hit.title}] ${hit.text.slice(0, 420)}`),
+        evidence: references,
         pinnedFacts: session.pinned.map((fact) => fact.text),
         activePositions: session.claims.filter((claim) => claim.supersededBy === null).slice(-8).reverse()
           .map((claim) => ({ speaker: claim.speakerId, claim: claim.claim })),
@@ -260,8 +276,13 @@ export const useAura = create<AuraState>((set, get) => {
       patchSession({ lastContext: context, question });
 
       const model = resolveModel(data.provider, data.models[data.provider]);
-      const systemPrompt = [buildSystemPrompt(data.basePrompt, data.prefs), questionGuidance(question)].filter(Boolean).join('\n\n');
-      const schema = answerSchemaFor(question);
+      const sentRefs = new Set(context.usedEvidenceRefs ?? []);
+      const grounding = references.filter(({ ref }) => sentRefs.has(ref));
+      const systemPrompt = [buildSystemPrompt(data.basePrompt, data.prefs),
+        questionGuidance(question), personalEvidenceGuidance(personalQuestion, grounding.length > 0),
+        answerForUser && buildAnswerDnaGuidance(data.answerDna, { styleNote: data.prefs.styleNote, currentQuestion: text, mode: data.prefs.mode }),
+      ].filter(Boolean).join('\n\n');
+      const schema = answerSchemaFor(question, personalQuestion || grounding.length > 0);
       const textTokens = context.totalTokens + estimateTokens(systemPrompt) + estimateTokens(JSON.stringify(schema));
       if (textTokens > 4000) {
         throw new AuraError('INVALID_INPUT', 'Konteks teks melampaui batas sekitar 4.000 token. Pilih strategi Economy atau pendekkan input dan prompt dasar.');
@@ -309,7 +330,13 @@ export const useAura = create<AuraState>((set, get) => {
         },
       };
       const result = await callProvider(monitored, req, model, { requestId: id(), signal: controller.signal });
-      const answer = normalizeAnswer(parseJsonLoose(result.text), result.sources);
+      if (controller.signal.aborted || get().session.id !== session.id) return;
+      const normalized = normalizeAnswer(parseJsonLoose(result.text), result.sources);
+      const answer = answerForUser ? verifyAnswer(normalized, {
+        personalQuestion, technicalQuestion: question.domain !== 'general', question: text, language: question.language,
+        references: grounding, contextText: context.text,
+        previousAnswer: parentContext.find((turn) => turn.id === question.previousAnswerId)?.text,
+      }) : normalized;
       const words = enforceWordLimit(answer.jawaban_final, data.prefs.minWords, data.prefs.maxWords);
       answer.jawaban_final = words.text;
       answer.mode = data.prefs.mode === 'KETIK' ? 'ketik' : 'lisan';
@@ -351,6 +378,7 @@ export const useAura = create<AuraState>((set, get) => {
           appearance: { ...defaults.appearance, ...stored.appearance },
           updates: loadUpdatePreferences(stored.updates, true),
           teleprompter: loadTeleprompter(stored.teleprompter),
+          evidence: loadEvidenceVault(stored.evidence), answerDna: loadAnswerDna(stored.answerDna),
         } });
         set({ persistenceReady: true });
         if (isDesktop) {
@@ -510,6 +538,20 @@ export const useAura = create<AuraState>((set, get) => {
     deleteJob(jobId) {
       const { jobs, activeJobId } = get().data;
       get().setData({ jobs: jobs.filter((job) => job.id !== jobId), activeJobId: activeJobId === jobId ? null : activeJobId });
+    },
+    saveEvidence(entry) {
+      if (get().updateInstalling) throw new Error('AURA sedang memasang pembaruan.');
+      const normalized = normalizeEvidenceEntry(entry);
+      const { evidence, documents } = get().data;
+      if (!normalized || (normalized.documentId && !documents.some((doc) => doc.id === normalized.documentId))) {
+        throw new Error('Periksa isi bukti dan pilih dokumen yang masih tersedia.');
+      }
+      get().setData({ evidence: evidence.some((item) => item.id === normalized.id)
+        ? evidence.map((item) => item.id === normalized.id ? normalized : item) : [normalized, ...evidence] });
+    },
+    removeEvidence(entryId) {
+      if (get().updateInstalling) throw new Error('AURA sedang memasang pembaruan.');
+      get().setData({ evidence: get().data.evidence.filter((entry) => entry.id !== entryId) });
     },
     deleteHistory(historyId) { get().setData({ history: get().data.history.filter((entry) => entry.id !== historyId) }); },
     clearData: track(async () => {

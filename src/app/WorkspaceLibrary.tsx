@@ -120,6 +120,7 @@ export function JobsPage() {
   const [profile, setProfile] = useState(s.data.profileFacts);
   const job = s.data.jobs.find((item) => item.id === editing);
   return <div className="aura-page">
+    <div className="aura-actions"><a className="aura-button" href="#evidence">Evidence Vault</a></div>
     <div className="aura-grid-two">
       <section className="aura-card">
         <div className="aura-card-heading"><div><span className="aura-kicker">PROFIL</span><h2>Pengalaman &amp; kemampuan</h2></div><BriefcaseBusiness size={19} /></div>
