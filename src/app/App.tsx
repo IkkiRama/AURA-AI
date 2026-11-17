@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
-  Activity, BookOpen, BriefcaseBusiness, ChevronRight, CloudOff, History, LayoutDashboard, MicOff, PanelTop,
-  Settings, ShieldCheck, SlidersHorizontal, Sparkles, X,
+  Activity, BookOpen, BriefcaseBusiness, ChevronRight, CloudOff, History, Info, LayoutDashboard, MicOff, PanelTop,
+  RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, X,
 } from 'lucide-react';
 import { formatIdr } from '@/features/budgets/cost';
 import { STAGE_LABEL } from '@/features/session/lifecycle';
@@ -10,6 +10,9 @@ import { desktop, errorMessage, isDesktop } from './platform';
 import { enableWorkspacePersistence, useAura } from './store';
 import { connectPanels } from './panels';
 import { Workspace, type PageId } from './Workspace';
+import { startUpdates, useUpdates } from './update/controller';
+import { ReleaseDialogs } from './update/ReleaseDialogs';
+import { UpdateHeaderBadge } from './update/ReleasePages';
 
 const pages = [
   { id: 'dashboard', title: 'Dashboard', icon: LayoutDashboard, description: 'Ruang persiapan interview dan diskusi.' },
@@ -20,20 +23,29 @@ const pages = [
   { id: 'prompts', title: 'Prompt Studio', icon: SlidersHorizontal, description: 'Atur format, gaya, dan panjang jawaban.' },
   { id: 'history', title: 'Session History', icon: History, description: 'Tinjau sesi yang diarsipkan.' },
   { id: 'settings', title: 'Settings', icon: Settings, description: 'Kelola provider, brankas, tampilan, dan anggaran.' },
+  { id: 'changelog', title: 'Changelog', icon: BookOpen, description: 'Riwayat fitur dan perubahan AURA.' },
 ] as const;
+const settingsPages = [
+  { id: 'settings-teleprompter', title: 'Teleprompter', icon: SlidersHorizontal, description: 'Atur mikrofon, highlight ucapan, dan scroll panel jawaban.' },
+  { id: 'settings-updates', title: 'Updates', icon: RefreshCw, description: 'Periksa versi dan atur waktu pemasangan.' },
+  { id: 'settings-about', title: 'About AURA', icon: Info, description: 'Informasi aplikasi dan pengembang.' },
+] as const;
+const routes = [...pages, ...settingsPages];
 
 function initialPage(): PageId {
   const page = location.hash.slice(1);
-  return pages.find((entry) => entry.id === page)?.id ?? 'dashboard';
+  return routes.find((entry) => entry.id === page)?.id ?? 'dashboard';
 }
 
 export function App() {
   const [page, setPage] = useState<PageId>(initialPage);
   const state = useAura((s) => s);
+  const version = useUpdates((s) => s.info?.version);
   useEffect(() => {
     const stopSaving = enableWorkspacePersistence();
     const disconnect = isDesktop ? connectPanels() : undefined;
     void useAura.getState().initialize();
+    const stopUpdates = startUpdates();
     const navigate = () => setPage(initialPage());
     window.addEventListener('hashchange', navigate);
     const stopListening = isDesktop ? listen<string>('aura:session-action', ({ payload }) => {
@@ -47,6 +59,7 @@ export function App() {
     }) : undefined;
     void stopListening?.catch((error: unknown) => useAura.getState().setNotice(errorMessage(error)));
     return () => {
+      stopUpdates();
       disconnect?.();
       stopSaving();
       window.removeEventListener('hashchange', navigate);
@@ -63,7 +76,8 @@ export function App() {
     void desktop('windows_show').catch((error: unknown) => state.setNotice(errorMessage(error)));
   }
 
-  const current = pages.find((item) => item.id === page) ?? pages[0];
+  const current = routes.find((item) => item.id === page) ?? pages[0];
+  const activePage = page.startsWith('settings-') ? 'settings' : page;
   const { session, data } = state;
   const used = session.usage.reduce((total, item) => total + item.usd, 0) * data.budget.fxUsdIdr;
   const ratio = Math.min(100, (used / Math.max(1, data.budget.limitIdr)) * 100);
@@ -77,13 +91,13 @@ export function App() {
       <div className="app-sidebar-body">
         <p className="app-nav-label">RUANG KERJA</p>
         <nav aria-label="Navigasi utama">
-          {pages.map(({ id, title, icon: Icon }) => <a key={id} href={`#${id}`} aria-label={title} onClick={() => goTo(id)} aria-current={page === id ? 'page' : undefined}>
-            <Icon size={17} strokeWidth={1.8} /><span>{title}</span>{page === id && <ChevronRight className="app-nav-arrow" size={14} />}
+          {pages.map(({ id, title, icon: Icon }) => <a key={id} href={`#${id}`} aria-label={title} onClick={() => goTo(id)} aria-current={activePage === id ? 'page' : undefined}>
+            <Icon size={17} strokeWidth={1.8} /><span>{title}</span>{activePage === id && <ChevronRight className="app-nav-arrow" size={14} />}
           </a>)}
         </nav>
       </div>
       <div className="app-sidebar-foot">
-        <div className="app-status-box"><ShieldCheck size={16} /><span><strong>Ruang kerja lokal</strong><small>{isDesktop ? 'AURA Desktop · v1.3' : 'Pratinjau browser · v1.3'}</small></span></div>
+        <div className="app-status-box"><ShieldCheck size={16} /><span><strong>Ruang kerja lokal</strong><small>{isDesktop ? 'AURA Desktop' : 'Pratinjau browser'}{version ? ` · v${version}` : ''}</small></span></div>
       </div>
     </aside>
     <div className="app-main">
@@ -91,6 +105,7 @@ export function App() {
         <div><div className="app-breadcrumb">AURA <ChevronRight size={12} /> RUANG KERJA</div><h1>{current.title}</h1><p>{current.description}</p></div>
         <div className="app-header-actions">
           <span className="app-stage"><i /> {session.paused ? 'Dijeda' : STAGE_LABEL[session.stage]}</span>
+          <UpdateHeaderBadge />
           {isDesktop && <button className="aura-button" type="button" onClick={openPanels}><PanelTop size={16} /> Panel desktop</button>}
         </div>
       </header>
@@ -114,5 +129,6 @@ export function App() {
         </aside>}
       </div>
     </div>
+    <ReleaseDialogs />
   </div>;
 }

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Check, Clipboard, Clock3, ExternalLink, LoaderCircle, RefreshCw, Scissors, Sparkles } from 'lucide-react';
 import type { AuraAnswer } from '../features/ai/answer.schema';
 import { DEFAULT_CALIBRATION, countWords, estimateSeconds } from '../features/answer/wordBudget';
+import { TechnicalAnswerDetails } from './TechnicalAnswerDetails';
 import './workspace.css';
 
 export interface AnswerPanelProps {
@@ -14,6 +15,7 @@ export interface AnswerPanelProps {
   typingWpm?: number;
   speakingWpm?: number;
   maxWords?: number;
+  speechText?: ReactNode;
 }
 
 function webUrl(value: string) {
@@ -25,7 +27,7 @@ function webUrl(value: string) {
   }
 }
 
-export function AnswerPanel({ answer, busy = false, error, onRegenerate, onShorten, compact = false, typingWpm = DEFAULT_CALIBRATION.typingWpm, speakingWpm = DEFAULT_CALIBRATION.speakingWpm, maxWords }: AnswerPanelProps) {
+export function AnswerPanel({ answer, busy = false, error, onRegenerate, onShorten, compact = false, typingWpm = DEFAULT_CALIBRATION.typingWpm, speakingWpm = DEFAULT_CALIBRATION.speakingWpm, maxWords, speechText }: AnswerPanelProps) {
   const [copiedText, setCopiedText] = useState('');
   const [copyError, setCopyError] = useState('');
   const words = answer ? countWords(answer.jawaban_final) : 0;
@@ -55,7 +57,7 @@ export function AnswerPanel({ answer, busy = false, error, onRegenerate, onShort
         {busy ? <><LoaderCircle className="aura-spin" size={23} /><p>Memproses konteks yang dikirim…</p></> : <><Sparkles size={23} /><p>Jawaban akan muncul di sini.</p>{!compact && <small>Tambahkan pertanyaan, transkrip berizin, atau screenshot di panel prompt.</small>}</>}
       </div>}
       {answer && <>
-        <p className="aura-answer-text" aria-live="polite">{answer.jawaban_final}</p>
+        {speechText ?? <p className="aura-answer-text" aria-live="polite">{answer.jawaban_final}</p>}
         <div className="aura-answer-meta"><Clock3 size={14} /> {words} kata · sekitar {estimateSeconds(words, answer.mode === 'ketik' ? 'KETIK' : 'LISAN', { typingWpm, speakingWpm })} detik</div>
         {answer.uncertain && <p className="aura-callout is-warning">Sebagian informasi belum pasti. Tinjau jawaban sebelum digunakan.</p>}
         {maxWords !== undefined && words > maxWords && <p className="aura-callout is-warning">Jawaban melebihi batas {maxWords} kata. Gunakan tombol Pendekkan.</p>}
@@ -65,6 +67,7 @@ export function AnswerPanel({ answer, busy = false, error, onRegenerate, onShort
           {answer.gestur && <div><dt>Gestur</dt><dd>{answer.gestur}</dd></div>}
           {answer.jeda && <div><dt>Jeda</dt><dd>{answer.jeda}</dd></div>}
         </dl>}
+        <TechnicalAnswerDetails answer={answer} />
         {sources.length > 0 && <div className="aura-source-list">{sources.map((source, index) => <a className="aura-badge" key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noopener noreferrer">{source.title || source.url} <ExternalLink size={12} /></a>)}</div>}
         <div className="aura-answer-actions">
           <button type="button" className="aura-button" onClick={() => void copy(answer.jawaban_final)}>{copiedText === answer.jawaban_final ? <Check size={15} /> : <Clipboard size={15} />} {copiedText === answer.jawaban_final ? 'Disalin' : 'Salin jawaban'}</button>

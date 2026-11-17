@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
-import { ArrowLeftToLine, ArrowRightToLine, Grip, Maximize2, Minimize2, Pin, PinOff, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowLeftToLine, ArrowRightToLine, Grip, Maximize2, Mic, MicOff, Minimize2, Pin, PinOff, SlidersHorizontal, X } from 'lucide-react';
 import { prefsLabel } from '@/features/prompts/defaults';
 import { isPreferenceOnlyMessage } from '@/features/prompts/overrides';
 import { apiAllowed, STAGE_LABEL } from '@/features/session/lifecycle';
@@ -9,6 +10,10 @@ import { AnswerPanel } from './AnswerPanel';
 import { Composer } from './Composer';
 import { desktop, errorMessage } from './platform';
 import { useAura, type Appearance, type AuraView } from './store';
+import { SpeechText } from '@/features/teleprompter/SpeechText';
+import { useSpeechTracking } from '@/features/teleprompter/useSpeechTracking';
+import { RescueSuggestion } from '@/features/teleprompter/RescueSuggestion';
+import { useRescue } from '@/features/teleprompter/useRescue';
 
 export type PanelName = 'prompt' | 'answer';
 type PanelView = {
@@ -17,7 +22,10 @@ type PanelView = {
   calibration: AuraView['data']['calibration'];
   provider: AuraView['data']['provider'];
   models: AuraView['data']['models'];
-  session: Pick<AuraView['session'], 'stage' | 'paused' | 'cloudConsent' | 'answer' | 'busy' | 'error'>;
+  session: Pick<AuraView['session'], 'id' | 'stage' | 'paused' | 'cloudConsent' | 'answer' | 'busy' | 'error' | 'question'>;
+  teleprompter: AuraView['data']['teleprompter'];
+  speechResumeRequest: number;
+  speechAllowed: boolean;
   vault: AuraView['vault'];
   text: string;
   image: ImageInput | null;
@@ -31,18 +39,35 @@ type Message = Action | { kind: 'snapshot'; view: PanelView };
 
 const panelChannel = (panel: PanelName) => new BroadcastChannel(`aura-panel-${panel}-1`);
 
+function speechAllowed(state: AuraView) {
+  const { data, session } = state;
+  return state.initialized && !state.updateInstalling && data.teleprompter.enabled && Boolean(data.teleprompter.deviceId)
+    && apiAllowed(session.stage, session.paused).allowed && Boolean(session.answer?.jawaban_final);
+}
+
 function viewOf(state: AuraView, panel: PanelName): PanelView {
   const { data, session } = state;
-  const { stage, paused, cloudConsent, answer, busy, error } = session;
+  const { id, stage, paused, cloudConsent, answer, busy, error, question } = session;
   return {
     appearance: data.appearance, prefs: data.prefs, calibration: data.calibration,
     provider: data.provider, models: data.models, vault: state.vault,
-    session: { stage, paused, cloudConsent, answer, busy, error },
+    session: { id, stage, paused, cloudConsent, answer, busy, error, question },
+    teleprompter: data.teleprompter, speechResumeRequest: state.speechResumeRequest, speechAllowed: speechAllowed(state),
     text: panel === 'prompt' ? state.text : '', image: panel === 'prompt' ? state.image : null,
   };
 }
 
 export function connectPanels() {
+  let permit = Promise.resolve();
+  function updatePermit(allowed: boolean) {
+    permit = permit.then(() => desktop<void>('speech_permit', { allowed })).catch(() => undefined);
+  }
+  updatePermit(speechAllowed(useAura.getState()));
+  const stopPermit = useAura.subscribe((current, previous) => {
+    const allowed = speechAllowed(current);
+    if (allowed !== speechAllowed(previous) || current.session.id !== previous.session.id
+      || current.session.stage !== previous.session.stage || current.session.paused !== previous.session.paused) updatePermit(allowed);
+  });
   const connections = (['prompt', 'answer'] as const).map((panel) => {
     const channel = panelChannel(panel);
     function publish(state: AuraView) {
@@ -64,13 +89,18 @@ export function connectPanels() {
     };
     const unsubscribe = useAura.subscribe((current, previous) => {
       if (current.session === previous.session && current.data === previous.data && current.vault === previous.vault
+        && current.speechResumeRequest === previous.speechResumeRequest && speechAllowed(current) === speechAllowed(previous)
         && (panel === 'answer' || (current.text === previous.text && current.image === previous.image))) return;
       publish(current);
     });
     publish(useAura.getState());
     return () => { unsubscribe(); channel.close(); };
   });
-  return () => connections.forEach((close) => close());
+  return () => {
+    stopPermit();
+    updatePermit(false);
+    connections.forEach((close) => close());
+  };
 }
 
 type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>['startResizeDragging']>[0];
@@ -120,6 +150,21 @@ export function FloatingPanel({ panel }: { panel: PanelName }) {
   }
   const { session } = view;
   const access = apiAllowed(session.stage, session.paused);
+  const text = isPrompt ? '' : session.answer?.jawaban_final ?? '';
+  const rescueAllowed = Boolean(text) && access.allowed;
+  const rescue = useRescue(text, session.id, rescueAllowed);
+  const speech = useSpeechTracking(text, !isPrompt && view.speechAllowed, view.teleprompter, session.id, rescue.intercept);
+  const stopSpeech = speech.stop;
+  useEffect(() => {
+    if (isPrompt) return;
+    const unlisten = listen('aura:speech-suspend', () => stopSpeech());
+    return () => { void unlisten.then((dispose) => dispose()).catch(() => undefined); };
+  }, [isPrompt, stopSpeech]);
+  const microphoneOn = speech.state === 'active';
+  const microphoneOpen = microphoneOn || speech.state === 'opening';
+  const trackingStatus = speech.state === 'error' ? 'Microphone Error' : !view.speechAllowed || !microphoneOpen ? 'Paused'
+    : !microphoneOn || speech.alignment.status === 'LISTENING' ? 'Listening'
+    : ({ FOLLOWING: 'Following', IMPROVISING: 'Improvising', REJOINING: 'Rejoining' } as const)[speech.alignment.status];
   const disabledReason = !view.image && isPreferenceOnlyMessage(view.text) ? undefined
     : !access.allowed ? access.reason
     : !session.cloudConsent ? 'Aktifkan izin cloud di Copilot.'
@@ -140,7 +185,10 @@ export function FloatingPanel({ panel }: { panel: PanelName }) {
         <button type="button" title={top ? 'Lepas selalu di atas' : 'Selalu di atas'} aria-label="Selalu di atas" aria-pressed={top} onClick={() => patch({ [onTopKey]: !top })}>{top ? <PinOff size={15} /> : <Pin size={15} />}</button>
         <button type="button" title={compact ? 'Ukuran normal' : 'Mode ringkas'} aria-label="Mode ringkas" aria-pressed={compact}
           onClick={() => patch({ [compactKey]: !compact })}>{compact ? <Maximize2 size={15} /> : <Minimize2 size={15} />}</button>
-        <button type="button" title="Sembunyikan panel" aria-label="Sembunyikan panel" onClick={() => runWindow(win.hide())}><X size={17} /></button>
+        <button type="button" title="Sembunyikan panel" aria-label="Sembunyikan panel" onClick={() => {
+          if (!isPrompt) stopSpeech();
+          runWindow(win.hide());
+        }}><X size={17} /></button>
       </div>
     </div>
     {showControls && <div className="floating-settings">
@@ -157,10 +205,32 @@ export function FloatingPanel({ panel }: { panel: PanelName }) {
         setView((current) => ({ ...current, image })); post({ kind: 'image', image });
       }} onRun={() => post({ kind: 'run' })} onCancel={() => post({ kind: 'cancel' })} busy={session.busy}
         compact={compact} disabledReason={disabledReason} preferenceLabel={prefsLabel(view.prefs)} />
-        : <AnswerPanel answer={session.answer} busy={session.busy} error={session.error} compact={compact}
+        : <>{view.teleprompter.enabled && <div className="aura-speech-toolbar">
+          <button className="aura-button" type="button" aria-pressed={microphoneOn} disabled={!view.speechAllowed && !microphoneOpen}
+            onClick={() => { if (microphoneOpen) stopSpeech(); else void speech.start(); }}>
+            {microphoneOn ? <Mic size={15} /> : <MicOff size={15} />} {microphoneOpen ? 'Matikan mikrofon' : 'Aktifkan mikrofon'}
+          </button>
+          {microphoneOn && <span className="aura-speech-live">Mic aktif · Lokal</span>}
+          {view.teleprompter.showStatus && <span className="aura-help" role="status">{trackingStatus}</span>}
+        </div>}
+          {!view.teleprompter.deviceId && view.teleprompter.enabled && <p className="aura-help">Pilih perangkat di Settings → Teleprompter.</p>}
+          {speech.error && <p className="aura-callout is-error" role="alert">{speech.error}</p>}
+          <AnswerPanel answer={session.answer} busy={session.busy} error={session.error} compact={compact}
           typingWpm={view.calibration.typingWpm} speakingWpm={view.calibration.speakingWpm} maxWords={view.prefs.maxWords}
+          speechText={<>
+            {rescueAllowed && <RescueSuggestion status={rescue.status} result={rescue.result} onDismiss={rescue.dismiss}
+              alignment={rescue.alignment} onRescue={() => rescue.prepare({ script: speech.script, alignment: speech.alignment,
+                confirmedTranscript: speech.recentFinals.current, speakingWpm: view.calibration.speakingWpm,
+                maxWords: view.prefs.maxWords, targetSeconds: view.prefs.targetSeconds,
+                technical: Boolean(session.question && session.question.domain !== 'general') })} />}
+            {view.teleprompter.enabled ? <SpeechText script={speech.script} alignment={speech.alignment}
+              highlightMode={view.teleprompter.highlightMode} scrollMode={view.teleprompter.scrollMode}
+              sensitivity={view.teleprompter.sensitivity} smoothness={view.teleprompter.smoothness}
+              autoFollowEnabled={microphoneOn && view.speechAllowed && rescue.status !== 'READY'} resumeRequest={view.speechResumeRequest} />
+              : <p className="aura-answer-text" aria-live="polite">{text}</p>}
+          </>}
           onRegenerate={access.allowed && session.cloudConsent ? () => post({ kind: 'regenerate' }) : undefined}
-          onShorten={() => post({ kind: 'shorten' })} />}
+          onShorten={() => post({ kind: 'shorten' })} /></>}
     </div>
     <footer className="floating-footer"><span>{session.paused ? 'Dijeda' : STAGE_LABEL[session.stage]}</span><span>{view.models[view.provider]}</span></footer>
     {edges.map(({ key, direction }) => <div key={key} className={`floating-edge edge-${key}`} aria-hidden="true" onPointerDown={(event) => {

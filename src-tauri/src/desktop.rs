@@ -85,6 +85,7 @@ pub fn windows_toggle(app: AppHandle) -> Result<(), String> {
         app.get_webview_window(label).is_some_and(|panel| panel.is_visible().unwrap_or(false))
     });
     if both_visible {
+        stop_speech(&app);
         for label in PANELS {
             window(&app, label)?.hide().map_err(window_error)?;
         }
@@ -146,8 +147,15 @@ pub fn stop_cloud(app: &AppHandle) {
     }
 }
 
+fn stop_speech(app: &AppHandle) {
+    app.state::<crate::speech::Speech>().cancel();
+    let _ = app.emit_to("answer", "aura:speech-suspend", ());
+}
+
 fn session_action(app: &AppHandle, action: &str) {
     stop_cloud(app);
+    app.state::<crate::speech::Speech>().permit(false);
+    let _ = app.emit_to("answer", "aura:speech-suspend", ());
     let _ = app.emit("aura:session-action", action);
 }
 
@@ -157,6 +165,9 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
     };
     api.prevent_close();
     if window.label() != "main" {
+        if window.label() == "answer" {
+            stop_speech(window.app_handle());
+        }
         let _ = window.hide();
         return;
     }

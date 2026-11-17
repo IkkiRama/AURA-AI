@@ -1,0 +1,51 @@
+[
+  {
+    "version": "1.5.0",
+    "date": "2026-11-17",
+    "summary": "AURA menambahkan teleprompter dengan transkripsi lokal, Rescue manual, dan klasifikasi pertanyaan adaptif.",
+    "added": [
+      "Teleprompter di panel jawaban dengan mikrofon pilihan, highlight kata atau frasa, Auto Follow, dan Manual Scroll.",
+      "Rescue manual memberikan petunjuk dari naskah dan ucapan terakhir di perangkat.",
+      "Klasifikasi domain, pertanyaan lanjutan, bahasa, dan kompetensi untuk memilih struktur jawaban. Artefak teknis tersedia di bagian detail jawaban yang relevan."
+    ],
+    "improved": [
+      "Pertanyaan lanjutan memprioritaskan giliran induk dan jawaban terkait dalam konteks terbatas.",
+      "Preferensi teleprompter disimpan di ruang kerja. Audio dan transkrip mikrofon sementara diproses di memori."
+    ],
+    "fixed": ["Pemasangan pembaruan menunggu pemrosesan audio selesai."],
+    "changed": ["Transkripsi lokal memerlukan instalasi Whisper satu kali melalui skrip proyek."]
+  },
+  {
+    "version": "1.4.0",
+    "date": "2026-11-12",
+    "summary": "AURA menambahkan pembaruan aplikasi, riwayat rilis, dan halaman About AURA.",
+    "added": [
+      "Pemeriksaan, unduhan, dan pemasangan pembaruan bertanda tangan melalui Tauri Updater pada build resmi yang sudah dikonfigurasi.",
+      "Pengaturan pembaruan, progres unduhan, halaman About AURA, dan menu Changelog.",
+      "Dialog What's New setelah pembaruan berhasil, dengan status baca yang disimpan secara lokal."
+    ],
+    "improved": [
+      "Paket pembaruan dapat diunduh saat sesi berjalan. Pemasangan menunggu sesi berakhir dan penyimpanan lokal selesai.",
+      "Nomor versi aplikasi desktop ditampilkan dari metadata Tauri."
+    ],
+    "fixed": [],
+    "changed": [
+      "Skema database lokal memiliki versi agar perubahan mendatang dapat diterapkan secara bertahap."
+    ]
+  },
+  {
+    "version": "1.3.0",
+    "date": "2026-11-11",
+    "summary": "Rilis lokal Windows pertama untuk asisten interview AURA.",
+    "added": [
+      "Dashboard, Live Copilot, Session Intelligence, Knowledge Base, Jobs & Profiles, Prompt Studio, dan Session History.",
+      "Panel Prompt dan Jawaban yang dapat dipindah, diubah ukurannya, dan diatur opacity-nya.",
+      "Dukungan Gemini dan OpenAI dengan kunci API yang disimpan di Stronghold."
+    ],
+    "improved": [
+      "Sinkronisasi prompt antara dashboard dan panel mengambang.",
+      "Pencarian dokumen lokal menggunakan SQLite FTS5."
+    ],
+    "fixed": []
+  }
+]

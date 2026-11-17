@@ -1,0 +1,30 @@
+.aura-speech-text { min-width: 0; }
+.aura-speech-viewport {
+  min-width: 0;
+  max-block-size: clamp(4rem, calc(100dvh - 11rem), 22rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-radius: 4px;
+}
+.aura-speech-viewport:focus-visible { outline: 1px solid #5eead4; outline-offset: -1px; }
+.aura-speech-viewport .aura-speech-copy,
+.floating-body .aura-speech-viewport .aura-speech-copy { color: #f1f5f9; }
+.aura-speech-copy [data-speech-position] { transition: color 135ms ease-out; }
+.aura-speech-copy [data-speech-position='active'] { color: #5eead4; }
+.aura-speech-copy [data-speech-position='complete'] { color: #2dd4bf; }
+.aura-speech-resume { margin-top: 6px; font-size: .75em; }
+.aura-speech-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-block-end: 6px; }
+.aura-speech-live { color: #5eead4; font-size: .75em; }
+
+.aura-rescue { display: grid; gap: 6px; min-width: 0; }
+.aura-rescue-controls { display: flex; align-items: center; gap: 6px; }
+.aura-rescue-button { color: #5eead4; }
+.aura-rescue > small, .aura-rescue-reading > small { color: #94a3b8; font-size: .73em; }
+.aura-rescue-reading { display: grid; gap: 3px; padding: 7px 9px; border-inline-start: 2px solid #2dd4bf; border-radius: 4px; background: #102d326e; }
+.aura-rescue-reading .aura-speech-viewport { max-block-size: none; overflow: visible; scrollbar-gutter: auto; }
+.floating-body .aura-rescue-reading .aura-answer-text { font-size: 1.02em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .aura-speech-copy [data-speech-position] { transition: none; }
+}

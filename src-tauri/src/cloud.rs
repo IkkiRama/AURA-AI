@@ -110,6 +110,11 @@ impl Cloud {
         }
     }
 
+    pub fn is_idle_for_update(&self) -> bool {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        !state.enabled && state.in_flight.is_empty()
+    }
+
     fn begin(&self, request_id: String) -> Result<InFlight<'_>, ApiError> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state.enabled {

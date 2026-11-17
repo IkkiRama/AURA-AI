@@ -4,7 +4,7 @@ AURA membantu persiapan interview dan role group discussion dari pertanyaan, scr
 
 ## Menjalankan aplikasi desktop
 
-Di folder proyek, buka `release\AURA.exe` untuk langsung menjalankan AURA. Gunakan `release\AURA_1.3.0_x64-setup.exe` untuk instalasi Windows. Paket lokal ini dibuat tanpa tanda tangan digital.
+Di folder proyek, buka `release\AURA_1.5.0.exe` untuk menjalankan build lokal dengan updater nonaktif. Installer produksi yang ditandatangani memuat konfigurasi feed HTTPS dan kunci publik updater. Installer NSIS untuk rilis tersebut dibuat di `release\v<VERSI>\AURA_<VERSI>_x64-setup.exe`. Repositori menyertakan workflow **AURA Windows release** yang dijalankan secara manual di GitHub Actions. [Panduan rilis Windows](docs/RELEASE.md)
 
 ## Menjalankan dari kode sumber
 
@@ -18,6 +18,14 @@ npm run tauri dev
 
 `npm run dev` membuka pratinjau browser di `http://localhost:1420`. Pratinjau menyediakan alur lokal untuk mencoba tampilan, clipboard, dokumen, profil, dan preferensi. Jalankan host desktop untuk memakai vault, koneksi provider, SQLite FTS5, dan jendela Windows.
 
+## Pembaruan aplikasi
+
+Buka **Settings → Updates** untuk memeriksa rilis, melihat progres unduhan, dan mengatur pemeriksaan, unduhan, pemasangan saat idle, serta dialog What's New. Pada installer produksi dengan feed HTTPS dan kunci publik, AURA memeriksa pembaruan setelah aplikasi dibuka dan memverifikasi tanda tangan paket. Pemasangan menunggu sesi berakhir dan pekerjaan yang sedang berlangsung selesai. Windows membuka kembali AURA setelah pemasangan.
+
+**Settings → About AURA** menampilkan versi aplikasi, developer, status pembaruan, dan tautan **View Changelog**. Riwayat rilis tetap bisa dibaca tanpa internet. Rilis dengan akun Instagram developer yang dikonfigurasi menampilkan tautan profil di About AURA.
+
+Pengguna v1.3.0 memasang installer rilis yang sudah dikonfigurasi satu kali untuk mengaktifkan pembaruan otomatis. Pengaturan, riwayat lokal, dokumen, dan vault dibaca dari profil Windows yang sama. Rincian cadangan dan pemulihan tersedia di [Panduan rilis Windows](docs/RELEASE.md).
+
 ## Penggunaan pertama
 
 1. Buka **Settings**, buat kata sandi brankas minimal delapan karakter, lalu simpan API key Gemini atau OpenAI. Gunakan kata sandi yang sama saat membuka brankas pada kesempatan berikutnya.
@@ -29,6 +37,18 @@ npm run tauri dev
 7. Gunakan **Akhiri sesi** setelah selesai. Penyimpanan riwayat lokal dapat diaktifkan di Settings sebelum sesi diakhiri.
 
 Preferensi juga dapat diperbarui sekali melalui kolom prompt, misalnya `Mulai sesi ini seluruh jawaban maksimal 45 detik untuk mengetik, panjang 25–35 kata.` Preferensi tersebut digunakan pada input berikutnya.
+
+## Teleprompter dan Rescue
+
+Untuk menyiapkan Whisper lokal di Windows x64, jalankan dari folder proyek.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-speech.ps1
+```
+
+Buka **Settings → Teleprompter**, pilih mikrofon, dan aktifkan **Speech Tracking**. Saat sesi aktif dan panel Jawaban berisi naskah, tekan **Aktifkan mikrofon**. Gunakan headset untuk mengurangi suara peserta lain yang ikut masuk melalui mikrofon. Mengakhiri atau menjeda sesi menghentikan capture. Panel menampilkan status ketika mikrofon aktif. Setelah pemasangan model, transkripsi dan pencocokan berjalan secara lokal.
+
+**Rescue** menampilkan petunjuk pendek dari naskah dan posisi bicara yang bisa dikenali. Saran tetap tersedia dari naskah ketika mikrofon mati. Teknologi dan status tahapan pengembangan tercatat di [checkpoint pengembangan](docs/DEVELOPMENT_STATE.md).
 
 ## Jendela dan shortcut
 
@@ -70,8 +90,10 @@ Simulasi RGD lokal menyediakan skenario dan peserta contoh berlabel simulasi. To
 ## Pengujian dan build
 
 ```powershell
+npm run lint
 npm run typecheck
 npm test
+node --test scripts/release-metadata.test.mjs
 $env:AURA_E2E_CHANNEL = "chrome"
 npm run e2e
 npm run build
@@ -82,7 +104,7 @@ Gunakan `npx playwright install chromium` bila browser yang didukung belum terse
 
 Uji koneksi provider memerlukan API key pengguna, model yang tersedia untuk akun tersebut, tahap sesi aktif, dan izin cloud. Pengujian otomatis memakai respons provider tiruan untuk memeriksa alur tanpa biaya API.
 
-## Hasil verifikasi lokal
+## Hasil verifikasi build lokal v1.3.0
 
 Build MSVC x64 yang disertakan menggunakan profil pengembangan dengan aset frontend produksi. Lulus 31 uji unit TypeScript, 5 uji Playwright, dan 6 uji Rust. Pengujian AURA.exe membuka tiga jendela Windows, menyinkronkan prompt, memblokir API saat Standby, serta memeriksa docking, perubahan ukuran terpisah, dan kontrol panel di Settings.
 

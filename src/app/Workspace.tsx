@@ -12,12 +12,14 @@ import { apiAllowed, STAGE_INFO, STAGE_LABEL, STAGES, suggestStage } from '../fe
 import { AnswerPanel } from './AnswerPanel';
 import { Composer } from './Composer';
 import { HistoryPage, JobsPage, KnowledgePage } from './WorkspaceLibrary';
-import { PromptStudioPage, SettingsPage } from './WorkspaceSettings';
+import { PromptStudioPage, SettingsPage, SpeechSettingsPage } from './WorkspaceSettings';
 import { errorMessage, isDesktop } from './platform';
 import { useAura, type UsageRow } from './store';
+import { AboutPage, ChangelogPage, UpdatesPage } from './update/ReleasePages';
 import './workspace.css';
 
-export type PageId = 'dashboard' | 'copilot' | 'intelligence' | 'knowledge' | 'jobs' | 'prompts' | 'history' | 'settings';
+export type PageId = 'dashboard' | 'copilot' | 'intelligence' | 'knowledge' | 'jobs' | 'prompts' | 'history'
+  | 'settings' | 'settings-updates' | 'settings-about' | 'settings-teleprompter' | 'changelog';
 
 interface WorkspaceProps {
   page: PageId;
@@ -45,6 +47,10 @@ export function Workspace({ page, goTo, openPanels }: WorkspaceProps) {
     case 'prompts': return <PromptStudioPage />;
     case 'history': return <HistoryPage />;
     case 'settings': return <SettingsPage />;
+    case 'settings-updates': return <UpdatesPage />;
+    case 'settings-about': return <AboutPage />;
+    case 'settings-teleprompter': return <SpeechSettingsPage />;
+    case 'changelog': return <ChangelogPage />;
     default: return <DashboardPage goTo={goTo} openPanels={openPanels} />;
   }
 }

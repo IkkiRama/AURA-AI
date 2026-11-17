@@ -1,0 +1,11 @@
+{
+  "version": "1.4.0",
+  "notes": "Release notes are generated from src/app/update/changelog.json.",
+  "pub_date": "2026-11-11T00:00:00.000Z",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://downloads.example.invalid/aura/v1.4.0/AURA_1.4.0_x64-setup.exe",
+      "signature": "<content of the matching .sig file>"
+    }
+  }
+}

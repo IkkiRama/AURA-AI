@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+
+const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string };
 
 test.beforeEach(async ({ context }) => {
   if (process.env.AURA_E2E_DIST !== '1') return;
@@ -115,4 +118,97 @@ test('imports, edits, searches and deletes catatan.txt in the local library', as
   await page.getByRole('button', { name: 'Ya, hapus', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'catatan.txt', exact: true })).toHaveCount(0);
   await expect(page.getByText('Hasil pencarian kosong', { exact: true })).toBeVisible();
+});
+
+test('navigates Updates, About and Changelog without a configured browser updater', async ({ page, baseURL }) => {
+  const remoteRequests: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).origin !== baseURL) remoteRequests.push(request.url());
+  });
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  const releaseLinks = page.getByRole('navigation', { name: 'Pembaruan dan informasi aplikasi' });
+  await releaseLinks.getByRole('link', { name: 'Updates', exact: true }).click();
+
+  await expect(page).toHaveURL(/#settings-updates$/);
+  await expect(page.getByRole('heading', { name: 'Updates', exact: true })).toBeVisible();
+  await expect(page.getByRole('main').getByText(version, { exact: true })).toBeVisible();
+  await expect(page.getByText('Pembaruan belum dikonfigurasi', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check for Updates', exact: true })).toBeDisabled();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  await page.getByRole('main').getByRole('link', { name: 'Settings', exact: true }).click();
+  await releaseLinks.getByRole('link', { name: 'About AURA', exact: true }).click();
+  await expect(page).toHaveURL(/#settings-about$/);
+  await expect(page.getByRole('heading', { name: 'About AURA', exact: true })).toBeVisible();
+  await expect(page.getByRole('main').getByText(version, { exact: true })).toBeVisible();
+  await expect(page.getByText('Rifki Romadhan', { exact: true })).toBeVisible();
+  const instagram = page.getByText('Instagram', { exact: true }).locator('..');
+  await expect(instagram).toContainText('Belum dikonfigurasi');
+  await expect(instagram.getByRole('link')).toHaveCount(0);
+  await expect(instagram.getByRole('button')).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'View Changelog', exact: true }).click();
+  await expect(page).toHaveURL(/#changelog$/);
+  await expect(page.getByRole('heading', { name: 'Changelog', exact: true })).toBeVisible();
+  const currentRelease = page.getByRole('article').filter({ has: page.getByRole('heading', { name: `AURA ${version}`, exact: true }) });
+  for (const label of ['Added', 'Improved', 'Fixed', 'Changed']) {
+    await expect(currentRelease.getByRole('heading', { name: label, exact: true })).toBeVisible();
+  }
+  await expect(page.getByRole('heading', { name: 'AURA 1.3.0', exact: true })).toBeVisible();
+  expect(remoteRequests).toEqual([]);
+});
+
+test('persists changed update preferences after reload', async ({ page }) => {
+  await page.goto('/#settings-updates');
+  const updatePreferences = [
+    page.getByRole('checkbox', { name: 'Automatic Update', exact: true }),
+    page.getByRole('checkbox', { name: 'Automatically Download Updates', exact: true }),
+    page.getByRole('checkbox', { name: 'Automatically Install When Idle', exact: true }),
+    page.getByRole('checkbox', { name: 'Notify After Update', exact: true }),
+  ];
+  for (const preference of updatePreferences) await expect(preference).toBeChecked();
+  await updatePreferences[0].uncheck();
+  await updatePreferences[2].uncheck();
+
+  await page.reload();
+  await expect(updatePreferences[0]).not.toBeChecked();
+  await expect(updatePreferences[1]).toBeChecked();
+  await expect(updatePreferences[2]).not.toBeChecked();
+  await expect(updatePreferences[3]).toBeChecked();
+});
+
+test('keeps teleprompter off by default and saves highlight and scroll preferences', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await page.getByRole('link', { name: 'Teleprompter', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Speech Tracking', exact: true })).not.toBeChecked();
+  await expect(page.getByRole('combobox', { name: 'Highlight Mode' })).toHaveValue('phrase');
+  await expect(page.getByRole('combobox', { name: 'Scroll Mode' })).toHaveValue('auto');
+  await page.getByRole('combobox', { name: 'Highlight Mode' }).selectOption('word');
+  await page.getByRole('combobox', { name: 'Scroll Mode' }).selectOption('manual');
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Highlight Mode' })).toHaveValue('word');
+  await expect(page.getByRole('combobox', { name: 'Scroll Mode' })).toHaveValue('manual');
+  await expect(page.getByRole('combobox', { name: 'Microphone Device' })).toBeDisabled();
+});
+
+test('shows What’s New once for a workspace migrated from AURA 1.3', async ({ page }) => {
+  await page.addInitScript(() => {
+    const key = 'aura-local-workspace-v1';
+    if (localStorage.getItem(key) === null) {
+      localStorage.setItem(key, JSON.stringify({ appearance: { answerOpacity: 67 } }));
+    }
+  });
+  await page.goto('/#copilot');
+  const whatsNew = page.getByRole('dialog', { name: "What's New in AURA" });
+  await expect(whatsNew).toBeVisible();
+  await expect(whatsNew.getByText(`AURA sudah diperbarui ke versi ${version}.`, { exact: true })).toBeVisible();
+  await whatsNew.getByRole('button', { name: 'Got it', exact: true }).click();
+  await expect(whatsNew).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByText(`Pratinjau browser · v${version}`, { exact: true })).toBeVisible();
+  await expect(whatsNew).toHaveCount(0);
+  await expect(page.getByRole('slider', { name: 'Opacity panel jawaban', exact: true })).toHaveValue('67');
 });

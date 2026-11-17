@@ -1,0 +1,21 @@
+{
+  "build": { "beforeBuildCommand": null },
+  "bundle": {
+    "createUpdaterArtifacts": true,
+    "targets": ["nsis"],
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
+    },
+    "aura": {
+      "instagramUsername": "",
+      "privacyPolicyUrl": "",
+      "license": ""
+    }
+  }
+}

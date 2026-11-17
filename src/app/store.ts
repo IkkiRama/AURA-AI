@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ANSWER_SCHEMA, type AuraAnswer } from '@/features/ai/answer.schema';
+import { answerSchemaFor, type AuraAnswer } from '@/features/ai/answer.schema';
 import { AuraError, isAuraError } from '@/features/ai/errors';
 import { estimateImageTokens, resolveModel } from '@/features/ai/models';
 import { normalizeAnswer, parseJsonLoose } from '@/features/ai/normalize';
@@ -18,10 +18,16 @@ import { applyOverride, isPreferenceOnlyMessage, parsePromptOverride } from '@/f
 import { classifyText, INITIAL_ACTIVITY, updateActivity, type ActivityState } from '@/features/session/activity';
 import { apiAllowed, canTransition, type SessionStage } from '@/features/session/lifecycle';
 import { desktop, errorMessage, isDesktop, transport } from './platform';
+import { DEFAULT_UPDATE_PREFERENCES, loadUpdatePreferences, type UpdatePreferences } from './update/model';
+import { DEFAULT_TELEPROMPTER, loadTeleprompter, type TeleprompterPreferences } from '@/features/teleprompter/preferences';
+import { classifyQuestion, questionGuidance, type QuestionAnalysis } from '@/features/intelligence/intent';
 
 export interface Doc { id: string; name: string; content: string; updatedAt: string }
 export interface Job { id: string; company: string; role: string; description: string }
-export interface Turn extends TurnLite { occurredAt: string }
+export interface Turn extends TurnLite {
+  occurredAt: string;
+  question?: Pick<QuestionAnalysis, 'relationship' | 'parentQuestionId' | 'intent' | 'domain'>;
+}
 export interface PinnedFact { id: string; text: string; sourceTurnId: number | null; createdAt: string }
 export interface UsageRow {
   id: string; provider: Provider; model: string; kind: 'answer' | 'retry' | 'summary' | 'connection'; at: string;
@@ -41,18 +47,22 @@ export interface WorkspaceData {
   calibration: typeof DEFAULT_CALIBRATION; budget: BudgetPolicy; appearance: Appearance;
   documents: Doc[]; jobs: Job[]; activeJobId: string | null; profileFacts: string;
   history: HistoryEntry[]; saveHistory: boolean; trayEnabled: boolean;
+  updates: UpdatePreferences; teleprompter: TeleprompterPreferences;
 }
 export interface SessionState {
   id: string; stage: SessionStage; paused: boolean; cloudConsent: boolean; activity: ActivityState;
   turns: Turn[]; pinned: PinnedFact[]; claims: ClaimLite[]; summaries: string[]; usage: UsageRow[];
   answer: AuraAnswer | null; lastContext: ContextPacket | null; error: string | null;
   busy: boolean; budgetWarning: string | null;
+  question: QuestionAnalysis | null;
 }
 interface VaultStatus { unlocked: boolean; gemini: boolean; openai: boolean; initialized?: boolean }
 export interface DocumentHit { id: string; text: string; title: string }
 export interface AuraView {
   data: WorkspaceData; session: SessionState; text: string; image: ImageInput | null;
   vault: VaultStatus; notice: string | null; initialized: boolean;
+  persistenceReady: boolean; updateInstalling: boolean; workspaceOperations: number;
+  speechResumeRequest: number;
 }
 interface AuraState extends AuraView {
   initialize: () => Promise<void>;
@@ -70,7 +80,9 @@ interface AuraState extends AuraView {
   addPin: (text: string) => void;
   removePin: (id: string) => void;
   setData: (patch: Partial<WorkspaceData>) => void;
+  setUpdatePreferences: (patch: Partial<UpdatePreferences>) => void;
   setAppearance: (patch: Partial<Appearance>) => void;
+  resumeSpeechFollow: () => void;
   importDocument: (file: File) => Promise<void>;
   updateDocument: (id: string, content: string) => Promise<void>;
   removeDocument: (id: string) => Promise<void>;
@@ -97,11 +109,12 @@ const defaults: WorkspaceData = {
   appearance: { promptOpacity: 45, answerOpacity: 45, promptOnTop: false, answerOnTop: false,
     promptCompact: false, answerCompact: false, blur: 0, fontScale: 100, highContrast: false },
   documents: [], jobs: [], activeJobId: null, profileFacts: '', history: [], saveHistory: false, trayEnabled: false,
+  updates: DEFAULT_UPDATE_PREFERENCES, teleprompter: DEFAULT_TELEPROMPTER,
 };
 const freshSession = (): SessionState => ({
   id: id(), stage: 'standby', paused: false, cloudConsent: false, activity: INITIAL_ACTIVITY, turns: [],
   pinned: [], claims: [], summaries: [], usage: [], answer: null, lastContext: null, error: null,
-  busy: false, budgetWarning: null,
+  busy: false, budgetWarning: null, question: null,
 });
 const browserKey = 'aura-local-workspace-v1';
 let activeCall: AbortController | null = null;
@@ -136,12 +149,24 @@ export const useAura = create<AuraState>((set, get) => {
 
   function notifyFailure(error: unknown) { get().setNotice(errorMessage(error)); }
 
-  function appendTurn(text: string, speaker: string) {
+  function track<Args extends unknown[], Result>(action: (...args: Args) => Promise<Result>) {
+    return async (...args: Args): Promise<Result> => {
+      if (get().updateInstalling) throw new Error('AURA sedang memasang pembaruan.');
+      set((state) => ({ workspaceOperations: state.workspaceOperations + 1 }));
+      try {
+        return await action(...args);
+      } finally {
+        set((state) => ({ workspaceOperations: state.workspaceOperations - 1 }));
+      }
+    };
+  }
+
+  function appendTurn(text: string, speaker: string, question?: Turn['question']) {
     const safeText = text.trim().slice(0, 12_000);
     if (!safeText) return;
     const s = get().session;
     const seq = (s.turns.at(-1)?.seq ?? 0) + 1;
-    const turn: Turn = { id: seq, seq, speaker: speaker.trim().slice(0, 80) || 'unknown', text: safeText, occurredAt: now() };
+    const turn: Turn = { id: seq, seq, speaker: speaker.trim().slice(0, 80) || 'unknown', text: safeText, occurredAt: now(), ...(question && { question }) };
     const turns = [...s.turns, turn];
     const claims = [...s.claims];
     if (turn.speaker !== 'aura' && detectStance(safeText) !== 'netral') {
@@ -182,7 +207,7 @@ export const useAura = create<AuraState>((set, get) => {
 
   async function generate(text: string, image: ImageInput | null, recordInput: boolean, resultSpeaker = 'aura') {
     const { data, session, vault } = get();
-    if (session.busy || activeCall) return;
+    if (session.busy || activeCall || get().updateInstalling) return;
     const permit = apiAllowed(session.stage, session.paused);
     const unavailable = !permit.allowed ? permit.reason : !isDesktop ? 'Jalankan aplikasi desktop AURA untuk memakai layanan AI.'
       : !session.cloudConsent ? 'Aktifkan izin pengiriman ke provider pada sesi ini.'
@@ -210,30 +235,40 @@ export const useAura = create<AuraState>((set, get) => {
       }
       const hits = await get().searchDocuments(searchText);
       const hiddenClaims = new Set(session.claims.filter((claim) => claim.supersededBy !== null).map((claim) => claim.id));
+      const liveTurns = session.turns.filter((turn) => !hiddenClaims.has(turn.id));
+      const job = data.jobs.find((entry) => entry.id === data.activeJobId);
+      const question = classifyQuestion({ text, hasImage: Boolean(image), activity: session.activity.type, stage: session.stage,
+        job, recentTurns: liveTurns.slice(-14), relevantHistory: matches,
+        knowledge: hits.slice(0, 3).map((hit) => hit.text.slice(0, 450)) });
+      const parentContext = [question.parentQuestionId, question.previousAnswerId]
+        .flatMap((turnId) => turnId === null ? [] : liveTurns.filter((turn) => turn.id === turnId));
+      const relevant = [...new Map([...parentContext, ...matches.filter((turn) => !hiddenClaims.has(turn.id))]
+        .map((turn) => [turn.id, turn])).values()];
       const context = assembleContext({
         strategy: data.budget.strategy, latestInput: text, hasImage: Boolean(image),
         stage: session.stage, activity: session.activity,
-        job: data.jobs.find((job) => job.id === data.activeJobId),
+        job,
         profileFacts: [...data.profileFacts.split('\n').filter(Boolean), ...hits.map((hit) => `[${hit.title}] ${hit.text}`)],
         pinnedFacts: session.pinned.map((fact) => fact.text),
         activePositions: session.claims.filter((claim) => claim.supersededBy === null).slice(-8).reverse()
           .map((claim) => ({ speaker: claim.speakerId, claim: claim.claim })),
         summaries: session.summaries,
-        recentTurns: session.turns.filter((turn) => !hiddenClaims.has(turn.id)).slice(-bounds.recentCount),
-        relevantHistory: matches.filter((turn) => !hiddenClaims.has(turn.id)),
+        recentTurns: liveTurns.slice(-bounds.recentCount),
+        relevantHistory: relevant,
       });
       if (controller.signal.aborted) return;
-      patchSession({ lastContext: context });
+      patchSession({ lastContext: context, question });
 
       const model = resolveModel(data.provider, data.models[data.provider]);
-      const systemPrompt = buildSystemPrompt(data.basePrompt, data.prefs);
-      const textTokens = context.totalTokens + estimateTokens(systemPrompt) + estimateTokens(JSON.stringify(ANSWER_SCHEMA));
+      const systemPrompt = [buildSystemPrompt(data.basePrompt, data.prefs), questionGuidance(question)].filter(Boolean).join('\n\n');
+      const schema = answerSchemaFor(question);
+      const textTokens = context.totalTokens + estimateTokens(systemPrompt) + estimateTokens(JSON.stringify(schema));
       if (textTokens > 4000) {
         throw new AuraError('INVALID_INPUT', 'Konteks teks melampaui batas sekitar 4.000 token. Pilih strategi Economy atau pendekkan input dan prompt dasar.');
       }
       const req: AIRequest = {
         provider: model.provider, model: model.id, systemPrompt, userPrompt: context.text, image: image ?? undefined,
-        maxOutputTokens: model.maxOutputTokens, allowWebSearch: false, schema: ANSWER_SCHEMA,
+        maxOutputTokens: model.maxOutputTokens, allowWebSearch: false, schema,
       };
       const estimate = estimateRequestCost(model, textTokens,
         image ? estimateImageTokens(model.provider, image.width, image.height) : 0, data.budget.fxUsdIdr,
@@ -279,7 +314,10 @@ export const useAura = create<AuraState>((set, get) => {
       answer.jawaban_final = words.text;
       answer.mode = data.prefs.mode === 'KETIK' ? 'ketik' : 'lisan';
       answer.estimasi_durasi_detik = estimateSeconds(words.words, data.prefs.mode, data.calibration);
-      if (recordInput && text.trim()) appendTurn(text, 'unknown');
+      if (recordInput && text.trim()) {
+        const { relationship, parentQuestionId, intent, domain } = question;
+        appendTurn(text, 'unknown', { relationship, parentQuestionId, intent, domain });
+      }
       if (image && answer.isi_terbaca.trim()) appendTurn(answer.isi_terbaca, 'aura');
       const activity = updateActivity(get().session.activity, {
         type: answer.activity_type, certainty: answer.activity_certainty, evidence: answer.activity_evidence, source: 'ai',
@@ -302,6 +340,7 @@ export const useAura = create<AuraState>((set, get) => {
 
   return {
     data: defaults, session: freshSession(), text: '', image: null, vault: blankVault, notice: null, initialized: false,
+    persistenceReady: false, updateInstalling: false, workspaceOperations: 0, speechResumeRequest: 0,
     async initialize() {
       try {
         const stored = isDesktop ? await desktop<Partial<WorkspaceData> | null>('db_load') :
@@ -310,7 +349,10 @@ export const useAura = create<AuraState>((set, get) => {
           ...defaults, ...stored, models: { ...defaults.models, ...stored.models },
           budget: { ...defaults.budget, ...stored.budget }, prefs: { ...defaults.prefs, ...stored.prefs },
           appearance: { ...defaults.appearance, ...stored.appearance },
+          updates: loadUpdatePreferences(stored.updates, true),
+          teleprompter: loadTeleprompter(stored.teleprompter),
         } });
+        set({ persistenceReady: true });
         if (isDesktop) {
           set({ vault: await desktop<VaultStatus>('vault_status') });
           if (get().data.trayEnabled) await desktop('desktop_set_tray', { enabled: true });
@@ -318,11 +360,11 @@ export const useAura = create<AuraState>((set, get) => {
       } catch (error) { notifyFailure(error); }
       finally { set({ initialized: true }); }
     },
-    setText: (text) => set({ text: text.slice(0, 12_000) }),
-    setImage: (image) => set({ image }),
+    setText: (text) => { if (!get().updateInstalling) set({ text: text.slice(0, 12_000) }); },
+    setImage: (image) => { if (!get().updateInstalling) set({ image }); },
     async run() {
       const { text, image, data, session } = get();
-      if (session.busy) return;
+      if (session.busy || get().updateInstalling) return;
       const override = isPreferenceOnlyMessage(text) ? parsePromptOverride(text) : null;
       if (override) {
         get().setData({ prefs: applyOverride(data.prefs, override) });
@@ -340,6 +382,7 @@ export const useAura = create<AuraState>((set, get) => {
       await generate(lastPrompt, null, false);
     },
     async shorten() {
+      if (get().updateInstalling) return;
       const answer = get().session.answer;
       if (!answer) return;
       const { prefs, calibration } = get().data;
@@ -352,6 +395,7 @@ export const useAura = create<AuraState>((set, get) => {
         estimasi_durasi_detik: estimateSeconds(words.words, prefs.mode, calibration) }, error: null });
     },
     changeStage(stage) {
+      if (get().updateInstalling) return;
       const s = get().session;
       if (!canTransition(s.stage, stage)) return;
       if (stage === 'standby' || stage === 'end') {
@@ -369,6 +413,7 @@ export const useAura = create<AuraState>((set, get) => {
       }
     },
     async setConsent(enabled) {
+      if (get().updateInstalling) return;
       const s = get().session;
       if (enabled && (!isDesktop || !apiAllowed(s.stage, s.paused).allowed)) {
         get().setNotice('Izin cloud tersedia pada tahap aktif di aplikasi desktop.');
@@ -386,6 +431,7 @@ export const useAura = create<AuraState>((set, get) => {
       void syncCloud().catch(notifyFailure);
     },
     newSession() {
+      if (get().updateInstalling) return;
       const s = get().session;
       get().cancel();
       archive(s);
@@ -396,25 +442,34 @@ export const useAura = create<AuraState>((set, get) => {
       void syncCloud().catch(notifyFailure);
     },
     addTurn(text, speaker = 'unknown') {
+      if (get().updateInstalling) return;
       const { stage, paused } = get().session;
       if (stage !== 'end' && !paused) appendTurn(text, speaker);
     },
     addPin(text) {
+      if (get().updateInstalling) return;
       const s = get().session;
       if (text.trim() && s.stage !== 'end') {
         const source = [...s.turns].reverse().find((turn) => turn.speaker !== 'aura' && turn.text.includes(text.trim()));
         patchSession({ pinned: [...s.pinned, { id: id(), text: text.trim().slice(0, 1000), sourceTurnId: source?.id ?? null, createdAt: now() }] });
       }
     },
-    removePin(pinId) { patchSession({ pinned: get().session.pinned.filter((pin) => pin.id !== pinId) }); },
+    removePin(pinId) {
+      if (!get().updateInstalling) patchSession({ pinned: get().session.pinned.filter((pin) => pin.id !== pinId) });
+    },
     setData(patch) {
+      if (get().updateInstalling) return;
       set((state) => ({ data: { ...state.data, ...patch } }));
       if (isDesktop && patch.trayEnabled !== undefined) {
         void desktop('desktop_set_tray', { enabled: patch.trayEnabled }).catch(notifyFailure);
       }
     },
+    setUpdatePreferences(patch) {
+      set((state) => ({ data: { ...state.data, updates: { ...state.data.updates, ...patch } } }));
+    },
     setAppearance(patch) { get().setData({ appearance: { ...get().data.appearance, ...patch } }); },
-    async importDocument(file) {
+    resumeSpeechFollow() { set((state) => ({ speechResumeRequest: state.speechResumeRequest + 1 })); },
+    importDocument: track(async (file: File) => {
       const issue = isSupportedTextFile(file.name, file.size);
       if (issue) throw new Error(issue);
       const content = (await file.text()).trim();
@@ -425,19 +480,19 @@ export const useAura = create<AuraState>((set, get) => {
       if (isDesktop) await desktop('db_upsert_document', { document });
       get().setData({ documents: [document, ...get().data.documents] });
       get().setNotice(`${file.name} diimpor ke Knowledge Base.`);
-    },
-    async updateDocument(docId, content) {
+    }),
+    updateDocument: track(async (docId: string, content: string) => {
       const existing = get().data.documents.find((doc) => doc.id === docId);
       if (!existing) return;
       if (!content.trim() || new TextEncoder().encode(content).length > 2 * 1024 * 1024) throw new Error('Isi dokumen harus berupa teks hingga 2 MB.');
       const document = { ...existing, content, updatedAt: now() };
       if (isDesktop) await desktop('db_upsert_document', { document });
       get().setData({ documents: get().data.documents.map((doc) => doc.id === docId ? document : doc) });
-    },
-    async removeDocument(docId) {
+    }),
+    removeDocument: track(async (docId: string) => {
       if (isDesktop) await desktop('db_delete_document', { id: docId });
       get().setData({ documents: get().data.documents.filter((doc) => doc.id !== docId) });
-    },
+    }),
     async searchDocuments(text) {
       const terms = extractKeywords(text);
       const query = buildFtsQuery(terms);
@@ -457,7 +512,7 @@ export const useAura = create<AuraState>((set, get) => {
       get().setData({ jobs: jobs.filter((job) => job.id !== jobId), activeJobId: activeJobId === jobId ? null : activeJobId });
     },
     deleteHistory(historyId) { get().setData({ history: get().data.history.filter((entry) => entry.id !== historyId) }); },
-    async clearData() {
+    clearData: track(async () => {
       get().cancel();
       const sessionId = get().session.id;
       set({ session: freshSession(), text: '', image: null });
@@ -470,25 +525,28 @@ export const useAura = create<AuraState>((set, get) => {
         await desktop('desktop_set_tray', { enabled: false });
         dropIndex(sessionId);
       } else localStorage.removeItem(browserKey);
-      set({ data: defaults, notice: 'Ruang kerja lokal direset.' });
-    },
-    async unlockVault(password) {
+      set({ data: { ...defaults, updates: {
+        ...DEFAULT_UPDATE_PREFERENCES, installedVersion: get().data.updates.installedVersion,
+        lastSeenVersion: get().data.updates.installedVersion,
+      } }, notice: 'Ruang kerja lokal direset.' });
+    }),
+    unlockVault: track(async (password: string) => {
       if (!isDesktop) throw new Error('Vault tersedia di aplikasi desktop.');
       await desktop('vault_unlock', { password });
       set({ vault: await desktop<VaultStatus>('vault_status') });
-    },
-    async lockVault() {
+    }),
+    lockVault: track(async () => {
       if (!isDesktop) return;
       get().cancel();
       await desktop('vault_lock');
       set({ vault: blankVault });
-    },
-    async setKey(provider, key) {
+    }),
+    setKey: track(async (provider: Provider, key: string) => {
       if (!isDesktop) throw new Error('Vault tersedia di aplikasi desktop.');
       await desktop('vault_set', { provider, key: key.trim() });
       set({ vault: await desktop<VaultStatus>('vault_status') });
-    },
-    async testProvider() {
+    }),
+    testProvider: track(async () => {
       const { data, session } = get();
       if (!isDesktop || !session.cloudConsent || !apiAllowed(session.stage, session.paused).allowed) {
         throw new Error('Aktifkan izin cloud pada tahap sesi aktif untuk menguji koneksi.');
@@ -503,8 +561,9 @@ export const useAura = create<AuraState>((set, get) => {
       if (get().session.id === session.id) patchSession({ usage: [...get().session.usage, row] });
       if (!result.ok) throw result.error;
       get().setNotice(`Koneksi ${data.provider === 'openai' ? 'OpenAI' : 'Gemini'} berhasil.`);
-    },
+    }),
     simulate() {
+      if (get().updateInstalling) return;
       const s = get().session;
       if (s.stage === 'end' || s.paused) { get().setNotice('Mulai atau lanjutkan sesi untuk latihan RGD.'); return; }
       appendTurn('Studi kasus RGD (simulasi): anggaran terbatas untuk memperbaiki antrean layanan. Tentukan prioritas dan keputusan bersama.', 'Moderator (simulasi)');
@@ -522,6 +581,25 @@ export const useAura = create<AuraState>((set, get) => {
     setNotice: (notice) => set({ notice }),
   };
 });
+
+export function workspaceCanInstallUpdate(state: AuraState): boolean {
+  const { session } = state;
+  const standbyEmpty = session.stage === 'standby' && !session.turns.length && !session.pinned.length
+    && !session.answer && !session.usage.length;
+  return state.initialized && state.persistenceReady && !state.updateInstalling && state.workspaceOperations === 0
+    && !session.busy && !activeCall && !session.cloudConsent && !state.text.trim() && !state.image
+    && (session.stage === 'end' || standbyEmpty);
+}
+
+export function acquireUpdateInstall(): (() => void) | null {
+  if (!workspaceCanInstallUpdate(useAura.getState())) return null;
+  useAura.setState({ updateInstalling: true });
+  return () => useAura.setState({ updateInstalling: false });
+}
+
+export async function flushWorkspaceForUpdate(): Promise<void> {
+  await Promise.all([pendingSave, pendingIndex, pendingCloud]);
+}
 
 export function enableWorkspacePersistence() {
   return useAura.subscribe((state, previous) => {

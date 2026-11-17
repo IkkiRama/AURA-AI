@@ -5,16 +5,17 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
 
 pub struct Database(Mutex<Connection>);
 
-const SCHEMA: &str = "
-    PRAGMA temp_store = MEMORY;
-    PRAGMA secure_delete = ON;
+const SCHEMA_VERSION: u32 = 1;
+
+// Version zero includes both new databases and the unversioned AURA 1.3 schema.
+const SCHEMA_V1: &str = "
     CREATE TABLE IF NOT EXISTS workspace (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         data TEXT NOT NULL
@@ -27,19 +28,45 @@ const SCHEMA: &str = "
         document_id UNINDEXED, title, text, tokenize = 'unicode61'
     );
     INSERT INTO document_search(document_search, rank) VALUES ('secure-delete', 1);
+";
+
+const TEMP_SCHEMA: &str = "
     CREATE VIRTUAL TABLE temp.turn_search USING fts5(
         session_id UNINDEXED, turn_id UNINDEXED, sequence UNINDEXED,
         speaker, text, turn_json UNINDEXED, tokenize = 'unicode61'
     );
 ";
 
+fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let version: u32 = transaction.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    match version {
+        0 => {
+            transaction.execute_batch(SCHEMA_V1)?;
+            transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        }
+        SCHEMA_VERSION => {}
+        newer => {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_SCHEMA),
+                Some(format!(
+                    "Versi penyimpanan lokal {newer} memerlukan AURA yang lebih baru."
+                )),
+            ));
+        }
+    }
+    transaction.commit()
+}
+
 impl Database {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         Self::initialize(Connection::open(path)?)
     }
 
-    fn initialize(connection: Connection) -> rusqlite::Result<Self> {
-        connection.execute_batch(SCHEMA)?;
+    fn initialize(mut connection: Connection) -> rusqlite::Result<Self> {
+        connection.execute_batch("PRAGMA temp_store = MEMORY; PRAGMA secure_delete = ON;")?;
+        migrate(&mut connection)?;
+        connection.execute_batch(TEMP_SCHEMA)?;
         Ok(Self(Mutex::new(connection)))
     }
 
@@ -329,6 +356,67 @@ pub fn db_clear(db: State<'_, Database>) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn upgrades_an_existing_workspace_without_rewriting_data() {
+        let old = Connection::open_in_memory().unwrap();
+        old.execute_batch(SCHEMA_V1).unwrap();
+        let saved = json!({
+            "documents": [{"id": "catatan", "name": "catatan.txt", "content": "Fakta rekonsiliasi"}],
+            "history": [{"id": "sesi-lama", "turns": ["Percakapan tersimpan"]}],
+            "prompt": {"question": "Pertanyaan lama"},
+            "appearance": {"promptOpacity": 45},
+            "sessionPreferences": {"retainHistory": true},
+            "futureField": {"keep": true}
+        });
+        synchronize_documents(&old, &saved).unwrap();
+        write_workspace(&old, &saved).unwrap();
+
+        let db = Database::initialize(old).unwrap();
+        let mut connection = db.connection().unwrap();
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert_eq!(workspace_data(&connection).unwrap(), Some(saved.clone()));
+        migrate(&mut connection).unwrap();
+        assert_eq!(workspace_data(&connection).unwrap(), Some(saved));
+        drop(connection);
+        assert_eq!(db.search_documents("rekonsiliasi", 5).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migration_failure_rolls_back_schema_and_version() {
+        let mut old = Connection::open_in_memory().unwrap();
+        old.execute("CREATE TABLE document_search (unrecognized TEXT)", [])
+            .unwrap();
+        assert!(migrate(&mut old).is_err());
+        let version: u32 = old
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 0);
+        let created: i64 = old
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN ('workspace', 'document_index_state')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(created, 0);
+    }
+
+    #[test]
+    fn refuses_to_write_to_a_newer_schema() {
+        let mut newer = Connection::open_in_memory().unwrap();
+        newer
+            .pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+        assert!(migrate(&mut newer).is_err());
+        let version: u32 = newer
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION + 1);
+    }
 
     #[test]
     fn searches_old_turns_and_keeps_sessions_separate() {

@@ -1,0 +1,89 @@
+name: AURA Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'SemVer tanpa awalan v. Tag v<VERSION> harus sudah ada.'
+        required: true
+        type: string
+      publish:
+        description: 'Publikasikan setelah persetujuan environment aura-release-publish'
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    environment: aura-release-build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ inputs.version }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Prepare build dependencies
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup default stable-x86_64-pc-windows-msvc
+          npm ci
+          npx playwright install chromium
+      - name: Build, test, sign, and verify
+        shell: pwsh
+        env:
+          AURA_RELEASE_VERSION: ${{ inputs.version }}
+          AURA_UPDATE_ENDPOINT: ${{ vars.AURA_UPDATE_ENDPOINT }}
+          AURA_UPDATE_PUBLIC_KEY: ${{ vars.AURA_UPDATE_PUBLIC_KEY }}
+          AURA_RELEASE_ASSET_BASE_URL: https://github.com/${{ github.repository }}/releases/download/v${{ inputs.version }}/
+          AURA_INSTAGRAM_USERNAME: ${{ vars.AURA_INSTAGRAM_USERNAME }}
+          AURA_PRIVACY_POLICY_URL: ${{ vars.AURA_PRIVACY_POLICY_URL }}
+          AURA_LICENSE: ${{ vars.AURA_LICENSE }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: node scripts/release-windows.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aura-windows-v${{ inputs.version }}
+          path: release/v${{ inputs.version }}/
+          if-no-files-found: error
+
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: windows-latest
+    environment: aura-release-publish
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aura-windows-v${{ inputs.version }}
+          path: ${{ runner.temp }}/aura-release
+      - name: Publish the release only after every asset is attached
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          AURA_RELEASE_VERSION: ${{ inputs.version }}
+          AURA_RELEASE_DIR: ${{ runner.temp }}/aura-release
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:AURA_RELEASE_VERSION -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw 'Invalid release version'
+          }
+          $tag = "v$env:AURA_RELEASE_VERSION"
+          $installer = Join-Path $env:AURA_RELEASE_DIR "AURA_$($env:AURA_RELEASE_VERSION)_x64-setup.exe"
+          $signature = "$installer.sig"
+          $notes = Join-Path $env:AURA_RELEASE_DIR 'release-notes.md'
+          $manifest = Join-Path $env:AURA_RELEASE_DIR 'latest.json'
+          gh release create $tag --draft --verify-tag --title "AURA $tag" --notes-file $notes
+          gh release upload $tag $installer $signature
+          gh release upload $tag $manifest
+          gh release edit $tag --draft=false --latest

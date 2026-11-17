@@ -9,6 +9,9 @@ import { DEFAULT_BASE_PROMPT, defaultWordRange, KETIK_45, LISAN_45, prefsLabel, 
 import { apiAllowed } from '../features/session/lifecycle';
 import { desktop, errorMessage, isDesktop } from './platform';
 import { useAura } from './store';
+import { ReleaseSettingsLinks } from './update/ReleasePages';
+import { TeleprompterSettings } from '@/features/teleprompter/TeleprompterSettings';
+import { listMicrophones, type MicrophoneDevice } from '@/features/teleprompter/useSpeechTracking';
 
 const providerName: Record<Provider, string> = { gemini: 'Google Gemini', openai: 'OpenAI' };
 const providers: Provider[] = ['gemini', 'openai'];
@@ -89,10 +92,29 @@ function NumberField({ label, value, min, max, onValue }: { label: string; value
 
 export function SettingsPage() {
   return <div className="aura-page">
+    <ReleaseSettingsLinks />
+    <a className="aura-button" href="#settings-teleprompter" style={{ justifySelf: 'start' }}>Teleprompter</a>
     <div className="aura-grid-two"><ProviderSettings /><AppearanceSettings /></div>
     <div className="aura-grid-two"><BudgetSettings /><CalibrationSettings /></div>
     <PrivacySettings />
   </div>;
+}
+
+export function SpeechSettingsPage() {
+  const preferences = useAura((s) => s.data.teleprompter);
+  const setData = useAura((s) => s.setData);
+  const resume = useAura((s) => s.resumeSpeechFollow);
+  const [devices, setDevices] = useState<MicrophoneDevice[]>([]);
+  const [hasEngine, setHasEngine] = useState(false);
+  function refresh() {
+    if (!isDesktop) return;
+    void listMicrophones().then(setDevices).catch(() => setDevices([]));
+    void desktop<boolean>('speech_engine_ready').then(setHasEngine).catch(() => setHasEngine(false));
+  }
+  useEffect(() => { refresh(); }, []);
+  return <TeleprompterSettings preferences={preferences} desktop={isDesktop} devices={devices} hasEngine={hasEngine}
+    onChange={(patch) => setData({ teleprompter: { ...useAura.getState().data.teleprompter, ...patch } })}
+    onResume={resume} onRefreshDevices={refresh} />;
 }
 
 function ProviderSettings() {

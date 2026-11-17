@@ -1,4 +1,7 @@
-import { AnswerSchema, type AuraAnswer } from './answer.schema';
+import {
+  ExperienceBasisSchema, LayeredAnswerSchema, MAX_ARTIFACT_LANGUAGE_LENGTH, MAX_ARTIFACT_LENGTH,
+  MAX_LAYER_ITEM_LENGTH, MAX_LAYER_ITEMS, MAX_TECHNICAL_EXPLANATION_LENGTH, type AuraAnswer,
+} from './answer.schema';
 import { AuraError } from './errors';
 import type { SourceRef } from './types';
 
@@ -42,6 +45,41 @@ function asString(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
 }
 
+function optionalText(value: unknown, limit: number): string | undefined {
+  return typeof value === 'string' ? value.trim().slice(0, limit) || undefined : undefined;
+}
+
+function optionalList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = [...new Set(value.slice(0, 24).map((item) => optionalText(item, MAX_LAYER_ITEM_LENGTH)).filter((item) => item !== undefined))]
+    .slice(0, MAX_LAYER_ITEMS);
+  return items.length ? items : undefined;
+}
+
+function codeArtifact(value: unknown): AuraAnswer['code_artifact'] {
+  if (!value || typeof value !== 'object' || !('content' in value) || typeof value.content !== 'string') return undefined;
+  const content = value.content.replace(/^(?:\r?\n)+|(?:\r?\n)+$/g, '');
+  // Avoid presenting an accidentally truncated artifact as runnable code.
+  if (content.length > MAX_ARTIFACT_LENGTH || !content.trim()) return undefined;
+  const language = 'language' in value ? optionalText(value.language, MAX_ARTIFACT_LANGUAGE_LENGTH) ?? '' : '';
+  return { language, content };
+}
+
+function normalizeLayers(raw: Record<string, unknown>) {
+  const basis = ExperienceBasisSchema.safeParse(raw.experience_basis);
+  const fields = {
+    key_points: optionalList(raw.key_points),
+    technical_explanation: optionalText(raw.technical_explanation, MAX_TECHNICAL_EXPLANATION_LENGTH),
+    supporting_evidence: optionalList(raw.supporting_evidence),
+    experience_basis: basis.success && basis.data !== 'not_applicable' ? basis.data : undefined,
+    potential_followups: optionalList(raw.potential_followups),
+    code_artifact: codeArtifact(raw.code_artifact),
+    coding_steps: optionalList(raw.coding_steps),
+    verification_steps: optionalList(raw.verification_steps),
+  };
+  return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+}
+
 /**
  * Coerces small, harmless deviations (float durations, missing optional
  * coaching fields) and then validates strictly with Zod. A missing or empty
@@ -81,8 +119,9 @@ export function normalizeAnswer(raw: unknown, extraSources: SourceRef[] = []): A
     activity_certainty: certainty,
     activity_evidence: Array.isArray(r.activity_evidence) ? r.activity_evidence.map(asString).filter(Boolean).slice(0, 8) : [],
     isi_terbaca: asString(r.isi_terbaca).slice(0, 2000),
+    ...normalizeLayers(r),
   };
-  const parsed = AnswerSchema.safeParse(candidate);
+  const parsed = LayeredAnswerSchema.safeParse(candidate);
   if (!parsed.success) {
     throw new AuraError('MALFORMED', 'Jawaban tidak sesuai schema.', parsed.error.issues.map((i) => i.message).join('; '));
   }

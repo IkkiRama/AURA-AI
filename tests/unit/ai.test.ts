@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ANSWER_SCHEMA, AnswerSchema, type AuraAnswer } from '../../src/features/ai/answer.schema';
+import { ANSWER_SCHEMA, AnswerSchema, answerSchemaFor, type AuraAnswer } from '../../src/features/ai/answer.schema';
 import { errorFromHttp } from '../../src/features/ai/errors';
 import { DEFAULT_MODELS, estimateImageTokens, resolveModel } from '../../src/features/ai/models';
 import { normalizeAnswer, parseJsonLoose } from '../../src/features/ai/normalize';
@@ -21,6 +21,22 @@ const answer: AuraAnswer = {
   activity_evidence: ['Moderator membagikan studi kasus.'],
   isi_terbaca: 'Bandingkan dua opsi logistik.',
 };
+
+it('uses the lean contract for concepts and a strict artifact contract for SQL', () => {
+  expect(answerSchemaFor({ intent: 'concept' })).toBe(ANSWER_SCHEMA);
+  const schema = answerSchemaFor({ intent: 'sql' }).jsonSchema;
+  expect(schema.required).toEqual(Object.keys(schema.properties as object));
+  expect(schema.properties).toHaveProperty('code_artifact.required', ['language', 'content']);
+  expect(answerSchemaFor({ intent: 'statistical-reasoning' }).jsonSchema.properties).not.toHaveProperty('code_artifact');
+});
+
+it('keeps returned code outside the spoken script and discards empty or oversized optional fields', () => {
+  expect(normalizeAnswer(answer)).toEqual(answer);
+  const code = 'SELECT id\nFROM customers;';
+  expect(normalizeAnswer({ ...answer, code_artifact: { language: 'SQL', content: code }, key_points: ['A', 'A', ' '] }))
+    .toMatchObject({ jawaban_final: answer.jawaban_final, code_artifact: { language: 'SQL', content: code }, key_points: ['A'] });
+  expect(normalizeAnswer({ ...answer, code_artifact: { language: 'SQL', content: 'x'.repeat(9_000) }, experience_basis: 'not_applicable' })).toEqual(answer);
+});
 
 it('estimates GPT-5.4 screenshot patches using the auto-detail budget', () => {
   expect(estimateImageTokens('openai', 1024, 1024)).toBe(1229);
